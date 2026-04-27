@@ -301,5 +301,73 @@ dnkLog('test manual', 'info')
 - Eliminadas ramas: develop, docs/ia-workflow, session/ultron-20260426
 - Creadas: `ultronk` (ULTRON_NK), `opusnk` (Opus)
 - Estructura final: main / ultronk / opusnk
-- [ ] Integrar filtro en el flujo: Tab → isTargetSafe() → atacar o skip
-- [ ] Considerar mejora del radar: grid en lugar de espiral para búsqueda más rápida
+
+---
+
+## Sesión 2026-04-27 (opusnk) — Investigación mob data + detección panel
+
+### Investigación completa de extracción de datos del mob
+
+Se investigaron 8 métodos para leer nombre/HP del mob seleccionado. **Todos fallaron excepto pixel analysis.** Ver `investigacion_mob_data.md` para detalle completo.
+
+**Conclusión técnica:** El juego es WebGL puro (Emscripten/WASM). No hay texto JS accesible, WebSocket encriptado, HEAP no expuesto.
+
+### Implementado: DNK Debug Console mejorada
+- Botón **Download (DL)** — descarga log completo como .txt
+- Buffer interno `fullLog[]` — copia todo aunque el DOM esté truncado
+- Límite subido a 2000 entradas
+- `DL/` agregado al `.gitignore`
+
+### Implementado: Radar logging
+- `searchTarget()` loguea posición, ángulo, tiempo y pixel del mob detectado
+- Cursor URL confirmada: `curattack.cur` + `curattack.png`
+
+### Implementado: sampleTargetUI() — detección del panel via MP bar
+
+**Estructura del panel confirmada por screenshots:**
+```
+[ Nombre mob ]   ← blanco / amarillo / ROJO según peligrosidad
+[ HP bar ]       ← roja/rosa
+[ MP bar ]       ← CYAN rgb(52,176,235) ← ancla de detección
+```
+
+**Flujo:**
+1. Busca MP bar (cyan) como ancla → posición exacta del panel
+2. Busca HP bar (roja) justo encima
+3. Escanea nombre (20-55px sobre MP) → cuenta pixels brillantes
+4. Clasifica: blanco=normal, amarillo=agresivo, rojo=peligroso
+
+**Resultados confirmados:**
+- Young Lawolf: MP y=100, HP y=96, nombre blanco 14.3% ✅
+- Cute Nyangnyang barra2: nombre amarillo/dorado
+- Cute Nyangnyang barra3: nombre ROJO ← peligroso
+
+**Pendiente:** confirmar threshold numérico del rojo/amarillo con log de mob peligroso
+
+### Eliminado (causaba lag de 5s)
+- `scanTargetMemory()` — iteraba window globals, solo falsos positivos
+- `searchHeapForMobName()` — HEAP no disponible, loop innecesario
+- `hookCanvasText()` — WebGL puro, nunca disparaba
+- Capture mode del wsInterceptor — datos encriptados, inútil
+
+### Próxima sesión — Servidor Python local
+
+El usuario quiere:
+1. **OCR del nombre del mob** → EasyOCR/Tesseract sobre screenshot del panel
+2. **Control de mouse nativo** → pyautogui
+3. **Futuro: YOLO** → detección visual de mobs en pantalla
+
+**Arquitectura propuesta:**
+```
+Extension JS → fetch localhost:5000/analyze → Python Flask
+                   ↑ base64 screenshot del panel
+                   ↓ { name, type: 'normal'|'aggressive'|'dangerous' }
+```
+
+### Checklist próxima sesión
+- [ ] Implementar servidor Flask en Python con endpoint `/analyze`
+- [ ] Capturar region del panel en la extensión y enviar como base64
+- [ ] OCR con EasyOCR para leer nombre del mob
+- [ ] Calibrar threshold de nombre rojo/amarillo con mob peligroso real
+- [ ] Probar flujo completo: Target → Tab → classify → atacar/skip
+- [ ] Considerar YOLO para detección de mobs en pantalla (largo plazo)
