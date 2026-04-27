@@ -1,6 +1,40 @@
-node_modules
-dist
-build
-.cache
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Cache
+.cache/
+
+# Locks
 package-lock.json
+yarn.lock
+
+# Compressed
 *.zip
+*.tar.gz
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# TypeScript
+*.tsbuildinfo
