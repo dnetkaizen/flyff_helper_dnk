@@ -203,7 +203,11 @@ class App {
         target.addEventListener("pointerdown", async () => {
             target.classList.remove("btn-primary");
             target.classList.add("btn-secondary");
-            await this.searchTarget();
+            const found = await this.searchTarget();
+            if (found) {
+                await timer(400);
+                this.sampleTargetUI();
+            }
             target.classList.remove("btn-secondary");
             target.classList.add("btn-primary");
         });
