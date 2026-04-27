@@ -997,105 +997,107 @@ class App {
             const ctx = tmp.getContext('2d')!;
             ctx.drawImage(gameCanvas, 0, 0);
 
-            // Panel is at TOP CENTER — scan top 12% of canvas, center 20%-80% x range
-            const stripH  = Math.floor(ch * 0.12);
-            const xStart  = Math.floor(cw * 0.20);
-            const xEnd    = Math.floor(cw * 0.80);
-            const pixels  = ctx.getImageData(0, 0, cw, stripH).data;
+            // Panel structure (confirmed from screenshots):
+            //   [ Nombre ]  ← white/yellow/red text
+            //   [ HP bar ]  ← red/pink horizontal bar
+            //   [ MP bar ]  ← cyan rgb(52,176,235) horizontal bar
+            // Located at TOP CENTER of screen
+            const stripH = Math.floor(ch * 0.14);
+            const xStart = Math.floor(cw * 0.20);
+            const xEnd   = Math.floor(cw * 0.80);
+            const pixels = ctx.getImageData(0, 0, cw, stripH).data;
 
-            debugLog(`[target UI] scan zona: y=0–${stripH} | x=${xStart}–${xEnd} (canvas ${cw}x${ch})`, 'info');
+            debugLog(`[target UI] scan: y=0–${stripH} | x=${xStart}–${xEnd} (canvas ${cw}x${ch})`, 'info');
 
-            // Search for HP bar: horizontal run of 20+ pixels where red dominates
-            // Enemy HP bars in Flyff are RED (confirmed in screenshot)
-            type HpBar = { y: number; color: 'red'|'green'|'yellow'; run: number; xStart: number; maxRun: number };
-            let best: HpBar | null = null;
+            // Step 1: Find MP bar (cyan rgb~52,176,235) as anchor — most reliable element
+            // MP bar is always present and has a very distinctive color
+            let mpBarY = -1;
+            let mpBarMaxRun = 0;
 
             for (let y = 0; y < stripH; y++) {
-                let rRun = 0, gRun = 0, yRun = 0;
-                let rX = 0, gX = 0, yX = 0;
-                let rMax = 0, gMax = 0, yMax = 0;
-
+                let run = 0, runX = 0, maxRun = 0;
                 for (let x = xStart; x < xEnd; x++) {
                     const i = (y * cw + x) * 4;
                     const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+                    // Cyan: b and g high, r low — rgb(52,176,235)
+                    if (b > 180 && g > 140 && r < 100 && b > g) {
+                        run++; if (run === 1) runX = x;
+                        if (run > maxRun) maxRun = run;
+                    } else run = 0;
+                }
+                if (maxRun > mpBarMaxRun) { mpBarMaxRun = maxRun; mpBarY = y; }
+            }
 
-                    // Red HP bar: r dominant, g and b low
-                    if (r > 130 && r > g + 50 && r > b + 50) {
-                        rRun++; if (rRun === 1) rX = x;
-                        if (rRun > rMax) { rMax = rRun; if (rMax >= 20 && (!best || rMax > best.maxRun)) best = { y, color: 'red', run: rRun, xStart: rX, maxRun: rMax }; }
-                    } else rRun = 0;
+            if (mpBarY === -1 || mpBarMaxRun < 15) {
+                debugLog(`[target UI] panel no visible — MP bar no encontrada`, 'warn');
+                return;
+            }
 
-                    // Green HP bar: g dominant (player or friendly)
-                    if (g > 120 && g > r + 40 && g > b + 40) {
-                        gRun++; if (gRun === 1) gX = x;
-                        if (gRun > gMax) { gMax = gRun; if (gMax >= 20 && (!best || gMax > best.maxRun)) best = { y, color: 'green', run: gRun, xStart: gX, maxRun: gMax }; }
-                    } else gRun = 0;
+            debugLog(`[target UI] MP bar: y=${mpBarY} run=${mpBarMaxRun}px`, 'info');
 
-                    // Yellow (low HP transition)
-                    if (r > 160 && g > 130 && b < 70) {
-                        yRun++; if (yRun === 1) yX = x;
-                        if (yRun > yMax) { yMax = yRun; if (yMax >= 20 && (!best || yMax > best.maxRun)) best = { y, color: 'yellow', run: yRun, xStart: yX, maxRun: yMax }; }
-                    } else yRun = 0;
+            // Step 2: HP bar is 1 bar-height above MP bar (~8-15px)
+            // Search in a window above the MP bar
+            const hpSearchStart = Math.max(0, mpBarY - 25);
+            const hpSearchEnd   = mpBarY - 2;
+            let hpBarY = -1, hpBarRun = 0;
+
+            for (let y = hpSearchStart; y <= hpSearchEnd; y++) {
+                let run = 0, maxRun = 0;
+                for (let x = xStart; x < xEnd; x++) {
+                    const i = (y * cw + x) * 4;
+                    const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+                    // Red/pink HP bar: r dominant
+                    if (r > 140 && r > g + 40 && r > b + 30) {
+                        run++;
+                        if (run > maxRun) maxRun = run;
+                    } else run = 0;
+                }
+                if (maxRun > hpBarRun) { hpBarRun = maxRun; hpBarY = y; }
+            }
+
+            if (hpBarY !== -1 && hpBarRun >= 15) {
+                debugLog(`[target UI] ✅ HP bar: y=${hpBarY} run=${hpBarRun}px`, 'success');
+            } else {
+                debugLog(`[target UI] HP bar no clara sobre MP bar (hpBarY=${hpBarY} run=${hpBarRun})`, 'warn');
+            }
+
+            // Step 3: Scan name area — rows above the HP bar (~20-40px above MP bar)
+            const nameYEnd   = Math.max(0, mpBarY - 20);
+            const nameYStart = Math.max(0, mpBarY - 55);
+
+            let whiteCount = 0, redCount = 0, yellowCount = 0, totalBright = 0;
+
+            for (let y = nameYStart; y <= nameYEnd; y++) {
+                for (let x = xStart; x < xEnd; x += 2) {
+                    const i = (y * cw + x) * 4;
+                    const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+                    const lum = (r + g + b) / 3;
+                    if (lum < 120) continue;
+                    totalBright++;
+                    if (r > 190 && g > 190 && b > 190)                    whiteCount++;   // white — normal mob
+                    else if (r > 190 && g < 80  && b < 80)                redCount++;     // red — dangerous
+                    else if (r > 200 && g > 140 && b < 80)                yellowCount++;  // yellow/gold — aggressive
                 }
             }
 
-            if (best) {
-                debugLog(`[target UI] ✅ HP bar: color=${best.color} y=${best.y} x=${best.xStart} run=${best.maxRun}px`, 'success');
-
-                // Scan rows ABOVE the bar for name text color
-                // Name text = bright pixels (luminance > 150) standing out from dark bg
-                const nameYEnd   = best.y - 2;
-                const nameYStart = Math.max(0, best.y - 35);
-
-                let whiteCount = 0, redCount = 0, orangeCount = 0, totalBright = 0;
-
-                for (let y = nameYStart; y <= nameYEnd; y++) {
-                    for (let x = xStart; x < xEnd; x += 2) {
-                        const i = (y * cw + x) * 4;
-                        const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
-                        const lum = (r + g + b) / 3;
-                        if (lum < 130) continue; // skip dark bg pixels
-                        totalBright++;
-                        if (r > 200 && g > 200 && b > 200)              whiteCount++;   // white text
-                        else if (r > 200 && g < 100 && b < 100)         redCount++;     // red text (dangerous)
-                        else if (r > 200 && g > 100 && g < 180 && b < 80) orangeCount++; // orange text
-                    }
-                }
-
-                if (totalBright === 0) {
-                    debugLog(`[nombre] sin píxeles brillantes sobre la barra (y=${nameYStart}–${nameYEnd})`, 'warn');
-                } else {
-                    const pct = (n: number) => ((n / totalBright) * 100).toFixed(1) + '%';
-                    debugLog(`[nombre] y=${nameYStart}–${nameYEnd} | bright=${totalBright} | blanco=${pct(whiteCount)} rojo=${pct(redCount)} naranja=${pct(orangeCount)}`, 'info');
-
-                    // Determine mob type
-                    const redRatio = (redCount + orangeCount) / totalBright;
-                    if (redRatio > 0.15) {
-                        debugLog(`[nombre] ⚠️ MOB PELIGROSO (nombre rojo/naranja ${(redRatio*100).toFixed(1)}%)`, 'error');
-                    } else if (whiteCount / totalBright > 0.1) {
-                        debugLog(`[nombre] ✅ mob normal (nombre blanco)`, 'success');
-                    } else {
-                        debugLog(`[nombre] indeterminado — más muestras necesarias`, 'warn');
-                        // Log pixel samples for calibration
-                        for (let y = nameYStart; y <= nameYEnd; y += 3) {
-                            const samples = [0.30, 0.35, 0.40, 0.45, 0.50, 0.55].map(xr => {
-                                const px = Math.floor(xr * cw);
-                                const i  = (y * cw + px) * 4;
-                                return `rgb(${pixels[i]},${pixels[i+1]},${pixels[i+2]})`;
-                            });
-                            debugLog(`  y=${y}: ${samples.join(' | ')}`, 'info');
-                        }
-                    }
-                }
+            if (totalBright < 10) {
+                debugLog(`[nombre] sin texto visible sobre la barra (y=${nameYStart}–${nameYEnd})`, 'warn');
             } else {
-                debugLog(`[target UI] HP bar no encontrada — colores por fila (y=0–${Math.min(stripH,60)}):`, 'warn');
-                for (let y = 0; y < Math.min(stripH, 60); y++) {
-                    let sr=0, sg=0, sb=0, n=0;
-                    for (let x = xStart; x < xEnd; x += 4) {
-                        const i = (y * cw + x) * 4;
-                        sr += pixels[i]; sg += pixels[i+1]; sb += pixels[i+2]; n++;
-                    }
-                    debugLog(`  y=${y}: avg rgb(${Math.round(sr/n)},${Math.round(sg/n)},${Math.round(sb/n)})`, 'info');
+                const pct = (n: number) => ((n / totalBright) * 100).toFixed(1) + '%';
+                debugLog(`[nombre] y=${nameYStart}–${nameYEnd} | bright=${totalBright} | blanco=${pct(whiteCount)} rojo=${pct(redCount)} amarillo=${pct(yellowCount)}`, 'info');
+
+                const redRatio    = redCount    / totalBright;
+                const yellowRatio = yellowCount / totalBright;
+                const whiteRatio  = whiteCount  / totalBright;
+
+                if (redRatio > 0.10) {
+                    debugLog(`[nombre] ⚠️ MOB PELIGROSO — nombre ROJO (${(redRatio*100).toFixed(1)}%)`, 'error');
+                } else if (yellowRatio > 0.10) {
+                    debugLog(`[nombre] ⚠️ MOB AGRESIVO — nombre AMARILLO/DORADO (${(yellowRatio*100).toFixed(1)}%)`, 'warn');
+                } else if (whiteRatio > 0.05) {
+                    debugLog(`[nombre] ✅ mob normal — nombre BLANCO (${(whiteRatio*100).toFixed(1)}%)`, 'success');
+                } else {
+                    debugLog(`[nombre] indeterminado — blanco=${pct(whiteCount)} rojo=${pct(redCount)} amarillo=${pct(yellowCount)}`, 'warn');
                 }
             }
 
