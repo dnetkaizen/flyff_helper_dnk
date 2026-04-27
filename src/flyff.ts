@@ -997,93 +997,59 @@ class App {
             const ctx = tmp.getContext('2d')!;
             ctx.drawImage(gameCanvas, 0, 0);
 
-            const stripH = Math.floor(ch * 0.25);
-            const pixels = ctx.getImageData(0, 0, cw, stripH).data;
+            // Panel is at TOP CENTER — scan top 12% of canvas, center 20%-80% x range
+            const stripH  = Math.floor(ch * 0.12);
+            const xStart  = Math.floor(cw * 0.20);
+            const xEnd    = Math.floor(cw * 0.80);
+            const pixels  = ctx.getImageData(0, 0, cw, stripH).data;
 
-            // Panel background confirmed: rgb(76,76,127) — dark blue-purple
-            // Detect panel Y range: rows where dominant color matches panel bg
-            let panelYStart = -1, panelYEnd = -1;
-            let maxRatio = 0, maxRatioY = -1;
+            debugLog(`[target UI] scan zona: y=0–${stripH} | x=${xStart}–${xEnd} (canvas ${cw}x${ch})`, 'info');
+
+            // Search for HP bar: horizontal run of 20+ pixels where red dominates
+            // Enemy HP bars in Flyff are RED (confirmed in screenshot)
+            type HpBar = { y: number; color: 'red'|'green'|'yellow'; run: number; xStart: number; maxRun: number };
+            let best: HpBar | null = null;
 
             for (let y = 0; y < stripH; y++) {
-                let panelPixels = 0, total = 0;
-                for (let x = 0; x < cw; x += 3) {
-                    const i = (y * cw + x) * 4;
-                    const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
-                    total++;
-                    // blue dominant with tolerance: b > 90 and b > r+10 and b > g+10
-                    if (b > 90 && b > r + 10 && b > g + 10) panelPixels++;
-                }
-                const ratio = panelPixels / total;
-                if (ratio > maxRatio) { maxRatio = ratio; maxRatioY = y; }
-                if (ratio > 0.20) {
-                    if (panelYStart === -1) panelYStart = y;
-                    panelYEnd = y;
-                }
-            }
+                let rRun = 0, gRun = 0, yRun = 0;
+                let rX = 0, gX = 0, yX = 0;
+                let rMax = 0, gMax = 0, yMax = 0;
 
-            if (panelYStart === -1) {
-                debugLog(`[target UI] panel no detectado — mejor ratio: ${(maxRatio*100).toFixed(1)}% en y=${maxRatioY}`, 'warn');
-                // Log top-5 rows by average color for calibration
-                const rowAvgs: {y:number; r:number; g:number; b:number}[] = [];
-                for (let y = 0; y < Math.min(stripH, 120); y++) {
-                    let sr=0,sg=0,sb=0,n=0;
-                    for (let x=0; x<cw; x+=4) { const i=(y*cw+x)*4; sr+=pixels[i]; sg+=pixels[i+1]; sb+=pixels[i+2]; n++; }
-                    rowAvgs.push({y, r:Math.round(sr/n), g:Math.round(sg/n), b:Math.round(sb/n)});
-                }
-                // sort by blue dominance
-                rowAvgs.sort((a,b) => (b.b - b.r - b.g) - (a.b - a.r - a.g)).slice(0,8).forEach(r => {
-                    debugLog(`  y=${r.y}: avg rgb(${r.r},${r.g},${r.b})`, 'info');
-                });
-                return;
-            }
-
-            debugLog(`[target UI] panel detectado y=${panelYStart}–${panelYEnd} (${panelYEnd - panelYStart + 1}px alto)`, 'success');
-
-            // Scan EVERY row inside panel looking for HP bar
-            // HP bar = horizontal run of 15+ consecutive green OR red pixels
-            let hpResult: { y: number; color: 'green'|'red'|'yellow'; run: number; xStart: number } | null = null;
-
-            for (let y = panelYStart; y <= panelYEnd && !hpResult; y++) {
-                let gRun = 0, rRun = 0, yRun = 0;
-                let gX = 0, rX = 0, yX = 0;
-
-                for (let x = 0; x < cw; x++) {
+                for (let x = xStart; x < xEnd; x++) {
                     const i = (y * cw + x) * 4;
                     const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
 
-                    // Green: g clearly dominant
-                    if (g > 120 && g > r * 1.4 && g > b * 1.4) {
-                        gRun++; if (gRun === 1) gX = x;
-                        if (gRun >= 15) { hpResult = { y, color: 'green', run: gRun, xStart: gX }; break; }
-                    } else gRun = 0;
-
-                    // Red: r clearly dominant
-                    if (r > 140 && r > g * 2 && r > b * 2) {
+                    // Red HP bar: r dominant, g and b low
+                    if (r > 130 && r > g + 50 && r > b + 50) {
                         rRun++; if (rRun === 1) rX = x;
-                        if (rRun >= 15) { hpResult = { y, color: 'red', run: rRun, xStart: rX }; break; }
+                        if (rRun > rMax) { rMax = rRun; if (rMax >= 20 && (!best || rMax > best.maxRun)) best = { y, color: 'red', run: rRun, xStart: rX, maxRun: rMax }; }
                     } else rRun = 0;
 
-                    // Yellow: r+g high, b low (mid HP)
-                    if (r > 160 && g > 140 && b < 80) {
+                    // Green HP bar: g dominant (player or friendly)
+                    if (g > 120 && g > r + 40 && g > b + 40) {
+                        gRun++; if (gRun === 1) gX = x;
+                        if (gRun > gMax) { gMax = gRun; if (gMax >= 20 && (!best || gMax > best.maxRun)) best = { y, color: 'green', run: gRun, xStart: gX, maxRun: gMax }; }
+                    } else gRun = 0;
+
+                    // Yellow (low HP transition)
+                    if (r > 160 && g > 130 && b < 70) {
                         yRun++; if (yRun === 1) yX = x;
-                        if (yRun >= 15) { hpResult = { y, color: 'yellow', run: yRun, xStart: yX }; break; }
+                        if (yRun > yMax) { yMax = yRun; if (yMax >= 20 && (!best || yMax > best.maxRun)) best = { y, color: 'yellow', run: yRun, xStart: yX, maxRun: yMax }; }
                     } else yRun = 0;
                 }
             }
 
-            if (hpResult) {
-                debugLog(`[target UI] HP bar: color=${hpResult.color} y=${hpResult.y} x=${hpResult.xStart} run=${hpResult.run}px`, 'success');
+            if (best) {
+                debugLog(`[target UI] ✅ HP bar detectada: color=${best.color} y=${best.y} x=${best.xStart} run=${best.maxRun}px`, 'success');
             } else {
-                debugLog(`[target UI] HP bar no encontrada dentro del panel — logueo fila a fila:`, 'warn');
-                // Log avg color of each panel row to help calibrate
-                for (let y = panelYStart; y <= Math.min(panelYEnd, panelYStart + 20); y++) {
-                    let sumR = 0, sumG = 0, sumB = 0, n = 0;
-                    for (let x = 0; x < cw; x += 4) {
+                debugLog(`[target UI] HP bar no encontrada — colores por fila (y=0–${Math.min(stripH,60)}):`, 'warn');
+                for (let y = 0; y < Math.min(stripH, 60); y++) {
+                    let sr=0, sg=0, sb=0, n=0;
+                    for (let x = xStart; x < xEnd; x += 4) {
                         const i = (y * cw + x) * 4;
-                        sumR += pixels[i]; sumG += pixels[i+1]; sumB += pixels[i+2]; n++;
+                        sr += pixels[i]; sg += pixels[i+1]; sb += pixels[i+2]; n++;
                     }
-                    debugLog(`  y=${y}: avg rgb(${Math.round(sumR/n)},${Math.round(sumG/n)},${Math.round(sumB/n)})`, 'info');
+                    debugLog(`  y=${y}: avg rgb(${Math.round(sr/n)},${Math.round(sg/n)},${Math.round(sb/n)})`, 'info');
                 }
             }
 
