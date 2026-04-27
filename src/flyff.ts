@@ -44,6 +44,7 @@ class App {
         initDebugConsole();
         (window as any).dnkLog = debugLog;
         debugLog('DNK Debug Console iniciada', 'success');
+        this.hookCanvasText();
 
         let interval = -1;
         const follow = <HTMLInputElement>html.get(`#input_follow`);
@@ -889,6 +890,46 @@ class App {
         // Clear buff warning and timer if all features are turned off
         if (!enabled && !this.isAppActive()) {
             this.clearBuffWarning();
+        }
+    }
+
+    private hookCanvasText() {
+        // Hook Module.ctx.fillText — called every time the game renders UI text
+        const tryHook = () => {
+            const mod = (window as any).Module;
+            const ctx = mod?.ctx;
+            if (!ctx || typeof ctx.fillText !== 'function') return false;
+
+            const origFill   = ctx.fillText.bind(ctx);
+            const origStroke = ctx.strokeText?.bind(ctx);
+
+            ctx.fillText = (text: string, x: number, y: number, maxWidth?: number) => {
+                if (text && String(text).trim().length > 1) {
+                    debugLog(`[canvas] fillText: "${text}" @ (${Math.round(x)},${Math.round(y)})`, 'success');
+                }
+                return origFill(text, x, y, maxWidth);
+            };
+
+            if (origStroke) {
+                ctx.strokeText = (text: string, x: number, y: number, maxWidth?: number) => {
+                    if (text && String(text).trim().length > 1) {
+                        debugLog(`[canvas] strokeText: "${text}" @ (${Math.round(x)},${Math.round(y)})`, 'info');
+                    }
+                    return origStroke(text, x, y, maxWidth);
+                };
+            }
+
+            debugLog(`[canvas] fillText hook instalado en Module.ctx`, 'success');
+            return true;
+        };
+
+        // Module.ctx may not exist yet — retry until available
+        if (!tryHook()) {
+            let attempts = 0;
+            const interval = setInterval(() => {
+                attempts++;
+                if (tryHook() || attempts > 100) clearInterval(interval);
+            }, 300);
         }
     }
 
