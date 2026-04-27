@@ -1970,5 +1970,4 @@ class App {
     }
 }
 
-initWebSocketInterceptor();
 new App();
