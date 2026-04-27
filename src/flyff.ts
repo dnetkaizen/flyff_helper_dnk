@@ -7,6 +7,7 @@ import Input from "./utils/inputs";
 import { timer } from "./utils/timer";
 import { ImageDetection } from "./utils/imageDetection";
 import { initDebugConsole, debugLog } from "./utils/debugConsole";
+import { initWebSocketInterceptor, activateCapture } from "./utils/wsInterceptor";
 
 // Declare global chrome/browser APIs
 declare const chrome: any;
@@ -205,6 +206,7 @@ class App {
             target.classList.add("btn-secondary");
             const found = await this.searchTarget();
             if (found) {
+                activateCapture();
                 await timer(400);
                 this.sampleTargetUI();
                 this.scanTargetMemory();
@@ -1968,4 +1970,5 @@ class App {
     }
 }
 
+initWebSocketInterceptor();
 new App();
