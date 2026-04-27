@@ -207,6 +207,7 @@ class App {
             if (found) {
                 await timer(400);
                 this.sampleTargetUI();
+                this.scanTargetMemory();
             }
             target.classList.remove("btn-secondary");
             target.classList.add("btn-primary");
@@ -1059,6 +1060,93 @@ class App {
         } catch (e) {
             debugLog(`[target UI] error: ${e}`, 'error');
         }
+    }
+
+    private scanTargetMemory() {
+        debugLog(`[mem scan] explorando window...`, 'info');
+
+        const MOB_KEYS = ['name','hp','mp','maxHp','maxMp','level','lv','id','type','health','mana','target','entity','mob','monster','selected','currentTarget'];
+        const seen = new Set<string>();
+
+        const formatVal = (v: any, depth: number): string => {
+            if (v === null) return 'null';
+            if (v === undefined) return 'undefined';
+            const t = typeof v;
+            if (t === 'function') return '[function]';
+            if (t === 'string') return `"${v.slice(0, 60)}${v.length > 60 ? '…' : ''}"`;
+            if (t === 'number' || t === 'boolean') return String(v);
+            if (t === 'object' && depth < 2) {
+                try {
+                    const keys = Object.keys(v).slice(0, 12);
+                    const entries = keys.map(k => `${k}: ${formatVal(v[k], depth + 1)}`).join(', ');
+                    return `{ ${entries}${Object.keys(v).length > 12 ? ', …' : ''} }`;
+                } catch { return '[object]'; }
+            }
+            return `[${t}]`;
+        };
+
+        const scanObject = (obj: any, path: string, depth: number) => {
+            if (depth > 2 || seen.has(path)) return;
+            seen.add(path);
+            try {
+                const keys = Object.keys(obj);
+                const hits = keys.filter(k => MOB_KEYS.some(mk => k.toLowerCase().includes(mk)));
+                if (hits.length >= 2) {
+                    debugLog(`[mem scan] ${path} — ${hits.length} propiedades relevantes`, 'success');
+                    hits.forEach(k => {
+                        try { debugLog(`  .${k} = ${formatVal(obj[k], 0)}`, 'info'); } catch {}
+                    });
+                }
+                // recurse one level into promising sub-objects
+                if (depth < 1) {
+                    keys.forEach(k => {
+                        try {
+                            const v = obj[k];
+                            if (v && typeof v === 'object' && !Array.isArray(v)) {
+                                scanObject(v, `${path}.${k}`, depth + 1);
+                            }
+                        } catch {}
+                    });
+                }
+            } catch {}
+        };
+
+        // 1. Scan window.Module (Emscripten)
+        const mod = (window as any).Module;
+        if (mod) {
+            debugLog(`[mem scan] window.Module encontrado`, 'success');
+            const modKeys = Object.keys(mod).filter(k => !k.startsWith('_') && !k.startsWith('asm'));
+            debugLog(`  keys publicas: ${modKeys.slice(0, 20).join(', ')}`, 'info');
+            scanObject(mod, 'Module', 0);
+        } else {
+            debugLog(`[mem scan] window.Module no existe`, 'warn');
+        }
+
+        // 2. Scan all window globals
+        let found = 0;
+        Object.keys(window).forEach(key => {
+            if (seen.has(key)) return;
+            try {
+                const val = (window as any)[key];
+                if (val && typeof val === 'object' && !Array.isArray(val)) {
+                    const keys = Object.keys(val);
+                    const hits = keys.filter(k => MOB_KEYS.some(mk => k.toLowerCase().includes(mk)));
+                    if (hits.length >= 2) {
+                        found++;
+                        debugLog(`[mem scan] window.${key} — hits: [${hits.join(', ')}]`, 'success');
+                        hits.forEach(k => {
+                            try { debugLog(`  .${k} = ${formatVal(val[k], 0)}`, 'info'); } catch {}
+                        });
+                    }
+                }
+            } catch {}
+        });
+
+        if (found === 0 && !mod) {
+            debugLog(`[mem scan] sin objetos con datos de mob en window`, 'warn');
+        }
+
+        debugLog(`[mem scan] completado`, 'info');
     }
 
     private async attackTarget(
