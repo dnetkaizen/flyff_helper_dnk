@@ -1065,88 +1065,75 @@ class App {
     private scanTargetMemory() {
         debugLog(`[mem scan] explorando window...`, 'info');
 
-        const MOB_KEYS = ['name','hp','mp','maxHp','maxMp','level','lv','id','type','health','mana','target','entity','mob','monster','selected','currentTarget'];
-        const seen = new Set<string>();
+        const MOB_KEYS = ['name','hp','mp','maxhp','maxmp','level','health','mana','target','entity','mob','monster','selected'];
 
-        const formatVal = (v: any, depth: number): string => {
+        // Keys and constructors that are safe to skip (huge buffers, DOM, etc.)
+        const SKIP_KEYS = new Set(['HEAP8','HEAP16','HEAP32','HEAPU8','HEAPU16','HEAPU32','HEAPF32','HEAPF64','buffer','asm','wasmMemory','wasmTable','canvas','document','window','self','top','parent','frames','performance','crypto','indexedDB','caches','localStorage','sessionStorage','history','location','navigator','screen']);
+        const SKIP_CTORS = new Set(['Uint8Array','Int8Array','Uint16Array','Int16Array','Uint32Array','Int32Array','Float32Array','Float64Array','ArrayBuffer','SharedArrayBuffer','HTMLCanvasElement','WebGLRenderingContext']);
+
+        const isSafe = (v: any): boolean => {
+            if (v === null || v === undefined) return false;
+            if (typeof v !== 'object') return false;
+            const ctor = v?.constructor?.name ?? '';
+            if (SKIP_CTORS.has(ctor)) return false;
+            if (v instanceof ArrayBuffer) return false;
+            return true;
+        };
+
+        const formatVal = (v: any): string => {
             if (v === null) return 'null';
             if (v === undefined) return 'undefined';
             const t = typeof v;
-            if (t === 'function') return '[function]';
-            if (t === 'string') return `"${v.slice(0, 60)}${v.length > 60 ? '…' : ''}"`;
+            if (t === 'function') return '[fn]';
+            if (t === 'string') return `"${v.slice(0, 80)}${v.length > 80 ? '…' : ''}"`;
             if (t === 'number' || t === 'boolean') return String(v);
-            if (t === 'object' && depth < 2) {
+            if (t === 'object') {
+                const ctor = v?.constructor?.name ?? '';
+                if (SKIP_CTORS.has(ctor)) return `[${ctor}]`;
                 try {
-                    const keys = Object.keys(v).slice(0, 12);
-                    const entries = keys.map(k => `${k}: ${formatVal(v[k], depth + 1)}`).join(', ');
-                    return `{ ${entries}${Object.keys(v).length > 12 ? ', …' : ''} }`;
+                    const keys = Object.keys(v).slice(0, 6);
+                    return `{ ${keys.map(k => `${k}: ${typeof v[k] === 'object' ? '[obj]' : String(v[k]).slice(0,30)}`).join(', ')} }`;
                 } catch { return '[object]'; }
             }
             return `[${t}]`;
         };
 
-        const scanObject = (obj: any, path: string, depth: number) => {
-            if (depth > 2 || seen.has(path)) return;
-            seen.add(path);
-            try {
-                const keys = Object.keys(obj);
-                const hits = keys.filter(k => MOB_KEYS.some(mk => k.toLowerCase().includes(mk)));
-                if (hits.length >= 2) {
-                    debugLog(`[mem scan] ${path} — ${hits.length} propiedades relevantes`, 'success');
-                    hits.forEach(k => {
-                        try { debugLog(`  .${k} = ${formatVal(obj[k], 0)}`, 'info'); } catch {}
-                    });
-                }
-                // recurse one level into promising sub-objects
-                if (depth < 1) {
-                    keys.forEach(k => {
-                        try {
-                            const v = obj[k];
-                            if (v && typeof v === 'object' && !Array.isArray(v)) {
-                                scanObject(v, `${path}.${k}`, depth + 1);
-                            }
-                        } catch {}
-                    });
-                }
-            } catch {}
-        };
-
-        // 1. Scan window.Module (Emscripten)
+        // 1. Scan window.Module safely (only non-heap keys)
         const mod = (window as any).Module;
         if (mod) {
-            debugLog(`[mem scan] window.Module encontrado`, 'success');
-            const modKeys = Object.keys(mod).filter(k => !k.startsWith('_') && !k.startsWith('asm'));
-            debugLog(`  keys publicas: ${modKeys.slice(0, 20).join(', ')}`, 'info');
-            scanObject(mod, 'Module', 0);
+            const safeKeys = Object.keys(mod).filter(k => !SKIP_KEYS.has(k) && !k.startsWith('HEAP') && !k.startsWith('asm') && !k.startsWith('dynCall'));
+            debugLog(`[mem scan] window.Module — ${safeKeys.length} keys seguras`, 'success');
+            debugLog(`  keys: ${safeKeys.slice(0, 30).join(', ')}`, 'info');
+            const hits = safeKeys.filter(k => MOB_KEYS.some(mk => k.toLowerCase().includes(mk)));
+            if (hits.length > 0) {
+                debugLog(`  hits mob: ${hits.join(', ')}`, 'success');
+                hits.forEach(k => { try { debugLog(`  Module.${k} = ${formatVal(mod[k])}`, 'info'); } catch {} });
+            }
         } else {
-            debugLog(`[mem scan] window.Module no existe`, 'warn');
+            debugLog(`[mem scan] window.Module no encontrado`, 'warn');
         }
 
-        // 2. Scan all window globals
+        // 2. Scan window globals (plain objects only, skip known heavy keys)
         let found = 0;
-        Object.keys(window).forEach(key => {
-            if (seen.has(key)) return;
+        const winKeys = Object.keys(window).filter(k => !SKIP_KEYS.has(k));
+        for (const key of winKeys) {
             try {
                 const val = (window as any)[key];
-                if (val && typeof val === 'object' && !Array.isArray(val)) {
-                    const keys = Object.keys(val);
-                    const hits = keys.filter(k => MOB_KEYS.some(mk => k.toLowerCase().includes(mk)));
-                    if (hits.length >= 2) {
-                        found++;
-                        debugLog(`[mem scan] window.${key} — hits: [${hits.join(', ')}]`, 'success');
-                        hits.forEach(k => {
-                            try { debugLog(`  .${k} = ${formatVal(val[k], 0)}`, 'info'); } catch {}
-                        });
-                    }
+                if (!isSafe(val)) continue;
+                const keys = Object.keys(val);
+                if (keys.length > 500) continue; // skip huge objects
+                const hits = keys.filter(k => MOB_KEYS.some(mk => k.toLowerCase().includes(mk)));
+                if (hits.length >= 2) {
+                    found++;
+                    debugLog(`[mem scan] window.${key} — hits: [${hits.join(', ')}]`, 'success');
+                    hits.slice(0, 10).forEach(k => {
+                        try { debugLog(`  .${k} = ${formatVal(val[k])}`, 'info'); } catch {}
+                    });
                 }
             } catch {}
-        });
-
-        if (found === 0 && !mod) {
-            debugLog(`[mem scan] sin objetos con datos de mob en window`, 'warn');
         }
 
-        debugLog(`[mem scan] completado`, 'info');
+        debugLog(`[mem scan] fin — objetos con datos de mob: ${found}`, found > 0 ? 'success' : 'warn');
     }
 
     private async attackTarget(
