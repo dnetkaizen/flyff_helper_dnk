@@ -166,10 +166,18 @@ chore: descripción corta       # build, config, sin lógica
 - [ ] Probar flujo completo: Target → Tab → isTargetSafe → atacar/skip
 - [ ] Mergear `opusnk` → `main` cuando esté estable
 
-## ⚠️ NO volver a intentar (ya falló)
+## ⚠️ NO volver a intentar (ya falló — ver investigacion_mob_data.md)
 
-- Subclase de WebSocket (`class X extends WebSocket`) → crashea el juego
-- `Module.UTF8ToString` hook → WASM no lo usa
-- `Module.platform_text_edited` hook → nunca se dispara para mobs
+- Subclase `class X extends WebSocket` → crashea el juego (pantalla negra)
+- `Module.UTF8ToString` hook → WASM no llama a esta función JS
+- `Module.platform_text_edited` hook → solo para inputs de texto, nunca dispara para mobs
 - Scan de `window` globals para datos de mob → solo falsos positivos Emscripten
-- `Module.HEAP8` → no expuesto en este build
+- `Module.HEAP8` → no expuesto en este build de Emscripten
+- `CanvasRenderingContext2D.prototype.fillText` global → nunca dispara (juego es WebGL puro)
+- `Module.ctx.fillText` → Module.ctx es contexto WebGL, no tiene fillText
+
+## 🔬 Pendiente testear (próxima sesión)
+
+1. **HP bar pixel scan** — panel ubicado en y≈65-85 con fondo purpúreo confirmado. Falta implementar búsqueda de run de píxeles verdes/rojos para detectar la barra de HP. Ver código en `investigacion_mob_data.md`.
+2. **HEAP via Module.asm** — explorar si `WebAssembly.Memory` es accesible por ruta alternativa.
+3. **Correlación paquete grande con selección de mob** — paquetes de 4523b y 5257b aparecen al hacer Tab. ¿Son siempre iguales?

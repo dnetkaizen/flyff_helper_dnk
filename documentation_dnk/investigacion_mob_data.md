@@ -1,67 +1,73 @@
 # Investigación: Obtener datos del mob seleccionado
 **Sesión:** 2026-04-26  
-**Objetivo:** Leer nombre, nivel y HP del mob seleccionado (Tab) para discriminar mobs peligrosos.
+**Objetivo:** Leer nombre, nivel y HP del mob seleccionado (Tab) para discriminar mobs peligrosos.  
+**Estado:** Investigación cerrada para texto/nombre. Pixel HP bar = único camino pendiente.
 
 ---
 
 ## Contexto técnico
 
-El juego corre sobre **WebGL + Emscripten/WASM**. Todo el estado del juego vive dentro de la memoria lineal WASM. El canvas principal es WebGL (no 2D), lo que significa que el texto de la UI se renderiza como texturas, no como llamadas a `fillText`.
+El juego corre sobre **WebGL + Emscripten/WASM**. Todo el estado del juego vive dentro de la memoria lineal WASM. El canvas principal es WebGL puro — texto, UI, barras de HP, todo se renderiza como polígonos/texturas WebGL. No existe ningún canvas 2D en la página.
 
 ---
 
-## Métodos intentados
+## Resumen ejecutivo
 
-### 1. Pixel sampling del canvas — PARCIAL
-**Idea:** Copiar frame WebGL a canvas 2D temporal y leer píxeles de la franja superior donde aparece el panel del target.
-
-**Resultado:**
-- Se detectan filas con alta varianza de brillo (panel UI presente)
-- Los colores obtenidos son de terreno/fondo, no del texto
-- Se encontró `rgb(255,255,255)` en `y≈178` → posiblemente borde o texto blanco
-- `rgb(116,241,255)` en `y=63 x=528` → color inusual, posible elemento UI
-- **No se puede leer texto** — solo píxeles individuales sin OCR
-
-**Por qué no funciona para texto:** El juego renderiza texto como texturas bitmap sobre polígonos WebGL. Un solo píxel no identifica letras.
-
-**Útil para:** Detectar la barra de HP (banda horizontal de color sólido verde/rojo). Pendiente implementar.
-
----
-
-### 2. window globals scan — FALLA
-**Idea:** Buscar objetos JS en `window` con propiedades como `name`, `hp`, `level`.
-
-**Resultado:** Solo encontró infraestructura Emscripten:
-- `window.AL` → sistema de audio OpenAL (falso positivo)
-- `window.JSEvents` → sistema de eventos de input (falso positivo)
-- `window.EmValType` → binding C++ (falso positivo)
-- `window.0` → iframe TCF (falso positivo)
-
-**Conclusión:** El juego no expone datos de mobs como objetos JS.
+| Método | Estado | Por qué no funciona |
+|---|---|---|
+| Window globals scan | ❌ DESCARTADO | Solo infraestructura Emscripten, no datos de mob |
+| WebSocket intercept | ❌ DESCARTADO | Paquetes encriptados con clave en WASM |
+| WASM HEAP search | ❌ DESCARTADO | `Module.HEAP8` no expuesto en este build |
+| `Module.UTF8ToString` hook | ❌ DESCARTADO | WASM no llama a la función JS |
+| `Module.platform_text_edited` | ❌ DESCARTADO | Solo para inputs de texto, no UI del juego |
+| `Module.ctx.fillText` | ❌ DESCARTADO | `Module.ctx` es WebGL, no tiene `fillText` |
+| `CanvasRenderingContext2D.prototype.fillText` global | ❌ DESCARTADO | Nunca disparó — juego usa WebGL puro |
+| WebSocket subclase constructor | ❌ DESCARTADO + PELIGROSO | Crashea el juego (pantalla negra) |
+| **Pixel scan HP bar** | 🔬 PENDIENTE TESTEAR | Panel ubicado en y≈65-85, falta encontrar la barra |
+| OCR sobre canvas | ⏸ DESCARTADO por ahora | Lento (~500ms), complejo, no vale la pena aún |
 
 ---
 
-### 3. WebSocket interception — FALLA (datos encriptados)
-**Idea:** Interceptar paquetes WebSocket para leer nombre/HP del mob cuando se selecciona.
+## Métodos descartados — detalle
+
+### 1. Window globals scan ❌
+**Qué se hizo:** Iterar `Object.keys(window)` buscando objetos con propiedades como `name`, `hp`, `level`, `maxHp`.
+
+**Resultado:** 4 hits, todos falsos positivos:
+- `window.AL` → sistema de audio OpenAL de Emscripten
+- `window.JSEvents` → sistema de eventos de input
+- `window.EmValType` → binding C++ de Emscripten  
+- `window.0` → iframe TCF (publicidad)
+
+**Por qué no funciona:** El juego no expone estado de entidades como objetos JS. Todo vive en WASM memory.
+
+---
+
+### 2. WebSocket intercept ❌
+**Qué se hizo:** Hookear `WebSocket.prototype.send` para detectar conexiones y escuchar mensajes.
 
 **Servidores detectados:**
-- `wss://login-lb-universe.flyff.com/` → autenticación
-- `wss://fwc-srv03-universe.flyff.com/` → servidor de juego
+- `wss://login-lb-universe.flyff.com/` → autenticación (cierra en code 1000)
+- `wss://fwc-srv03-universe.flyff.com/` → servidor de juego (permanente)
 
-**Resultado:** Todos los paquetes son binarios encriptados. Las "strings" extraídas son ruido (`{Qj`, `iRB`, `wxd`...), no datos legibles. El protocolo de red usa encriptación personalizada.
+**Frecuencia de paquetes:** ~200-400ms, constante durante el juego.
 
-**Método 1 — Subclase de WebSocket:** Crasheó el juego (pantalla negra). El juego detecta que el constructor nativo fue reemplazado.
+**Tamaños observados:** 63b, 101b, 113b, 155b–660b (updates periódicos), 972b–5257b (bulk, posiblemente lista de entidades al seleccionar mob).
 
-**Método 2 — Hook `WebSocket.prototype.send`:** No crashea. Detecta conexiones correctamente. Pero los datos siguen siendo encriptados.
+**Resultado:** Todos los paquetes son binario encriptado. Las strings extraídas son ruido aleatorio (`iRB`, `wxd`, `hRV`...). La clave de encriptación está dentro del WASM — no es recuperable desde JS sin reverse engineering del binario.
+
+**Intento fallido adicional:** Subclase `class FlyffWS extends WebSocket` → crash pantalla negra. El juego verifica integridad del constructor nativo.
+
+**Por qué no funciona:** Protocolo propietario encriptado. Sin key no hay datos legibles.
 
 ---
 
-### 4. WASM HEAP search — FALLA (HEAP no expuesto)
-**Idea:** Buscar el string "Aibatt" en la memoria WASM usando TextDecoder en chunks.
+### 3. WASM HEAP search ❌
+**Qué se hizo:** Intentar leer `Module.HEAP8` para buscar el string "Aibatt" con TextDecoder en chunks de 256KB.
 
-**Resultado:** `Module.HEAP8` no disponible. El build de Emscripten usado por Flyff no expone los buffers HEAP directamente en `window.Module`.
+**Resultado:** `Module.HEAP8` no existe. El build de Emscripten usado por Flyff Universe no expone los buffers HEAP en `window.Module`.
 
-**Keys seguras disponibles en Module:**
+**Keys disponibles en Module (18-21 keys):**
 ```
 totalDependencies, wasmBinary, requestAnimationFrame, pauseMainLoop, resumeMainLoop,
 UTF8ToString, stringToUTF8, _malloc, _free, _main, calledRun,
@@ -69,85 +75,138 @@ platform_text_edited, platform_got_devicemotion_permission, platform_captcha_com
 platform_websocket_open, platform_websocket_close, platform_websocket_message, ctx
 ```
 
-**Nota:** `wasmBinary` es el archivo WASM crudo (para carga), no la memoria runtime. No útil para leer estado.
+**Nota:** `_malloc` y `_free` están expuestos pero sin acceso al buffer de memoria no son útiles.
+
+**Por qué no funciona:** Build personalizado de Emscripten que no expone HEAP públicamente.
 
 ---
 
-### 5. Hook Module.UTF8ToString — FALLA (no llamado por WASM)
-**Idea:** Interceptar `Module.UTF8ToString` para capturar strings que el WASM convierte a JS.
+### 4. Module.UTF8ToString hook ❌
+**Qué se hizo:** Reemplazar `Module.UTF8ToString` con función que loguea cada conversión de string WASM→JS.
 
-**Resultado:** La función nunca disparó. El WASM usa su propia implementación interna de conversión de strings, no la función JS del módulo. `UTF8ToString` en Module es una utilidad para llamar desde JS, no desde WASM.
+**Resultado:** Nunca disparó durante el juego ni al seleccionar mobs.
 
----
-
-### 6. Hook Module.platform_text_edited — FALLA (nunca disparado)
-**Idea:** `platform_text_edited` sonaba a callback cuando cambia texto de UI.
-
-**Resultado:** Nunca se disparó durante selección de mobs ni durante el juego en general. Probablemente es para edición de campos de texto (chat input), no para UI del juego.
+**Por qué no funciona:** `Module.UTF8ToString` es una utilidad JavaScript para llamar desde JS code, no desde WASM. El WASM tiene su propia implementación interna de manejo de strings que no pasa por esta función.
 
 ---
 
-### 7. Hook Module.platform_websocket_message — FUNCIONA PARCIALMENTE
-**Idea:** Interceptar el callback que recibe mensajes WebSocket antes de que entren al WASM.
+### 5. Module.platform_text_edited hook ❌
+**Qué se hizo:** Hookear `Module.platform_text_edited` esperando que se dispare al actualizar texto de UI (nombre del mob, HP).
 
-**Resultado:** Se dispara correctamente con cada paquete recibido. Recibe un `MessageEvent` con `.data` binario. Sin embargo, los datos binarios son los mismos paquetes encriptados — la encriptación ocurre en el servidor y se desencripta DENTRO del WASM, por lo que `platform_websocket_message` recibe datos encriptados.
+**Resultado:** Nunca disparó durante selección de mobs ni durante el juego en general.
 
----
-
-### 8. Hook CanvasRenderingContext2D.prototype.fillText global — PENDIENTE PROBAR
-**Idea:** Si el juego usa algún canvas 2D (overlay de UI, chat, etc.), capturar todo texto renderizado.
-
-**Estado:** Implementado en `opusnk`, pendiente confirmar con log.
-
-**Hipótesis:** Poco probable que funcione porque el juego es puramente WebGL. Pero vale verificar.
+**Por qué no funciona:** Este callback es para edición de inputs de texto (campo de chat, login), no para renderizado de UI del juego.
 
 ---
 
-## Conclusiones
+### 6. Module.platform_websocket_message hook ⚠️ PARCIAL
+**Qué se hizo:** Hookear `Module.platform_websocket_message` para interceptar mensajes WebSocket antes de que entren al WASM.
 
-| Método | Estado | Razón |
+**Resultado:** Se dispara correctamente con cada paquete. Recibe el `MessageEvent` completo con `.data` como `ArrayBuffer`. Pero los datos son los mismos paquetes encriptados — la desencriptación ocurre DENTRO del WASM después de recibir los bytes.
+
+**Útil para:** Detectar frecuencia de comunicación, tamaño de paquetes, timing. No para leer datos de mob.
+
+---
+
+### 7. CanvasRenderingContext2D.prototype.fillText global hook ❌ DEFINITIVO
+**Qué se hizo:** Hookear el prototipo global de `fillText` para capturar cualquier texto 2D en la página.
+
+**Resultado:** Nunca disparó. Zero llamadas durante toda la sesión.
+
+**Por qué no funciona:** Confirma definitivamente que el juego usa WebGL puro para TODO el rendering. No existe ningún canvas 2D activo. El texto (nombres de mobs, HP, chat, UI) se renderiza como texturas bitmap sobre polígonos WebGL, nunca como `fillText`.
+
+**Importancia:** Este es el hallazgo más importante de la investigación. Cierra definitivamente todos los métodos basados en texto JS.
+
+---
+
+## Único camino viable: Pixel scan de barra de HP
+
+### Lo que sabemos del panel del target
+
+Del análisis de múltiples logs:
+
+| Sesión | Y del panel | Colores detectados |
 |---|---|---|
-| Pixel sampling | Parcial | No puede leer texto, solo colores |
-| Window globals | Falla | Datos no expuestos en JS |
-| WebSocket | Falla | Paquetes encriptados |
-| WASM HEAP | Falla | HEAP no expuesto en Module |
-| UTF8ToString hook | Falla | WASM no usa la función JS |
-| platform_text_edited | Falla | No se dispara para UI de mobs |
-| platform_websocket_message | Parcial | Datos encriptados |
-| fillText global | Pendiente | Bajo a probar |
+| Log 1 | y≈178 | `rgb(255,255,255)` → píxel blanco (texto/borde) |
+| Log 2 | y≈33-39 | Colores intermedios, terreno |
+| Log 3 | y≈55-66 | Marrones/tierra |
+| Log 4 | y≈65-85 | **Purpúreos** `rgb(76-88, 68-83, 83-121)` ← fondo del panel |
 
----
+**Conclusión:** El panel se mueve dependiendo de la posición de la ventana del juego / resolución. Los **colores purpúreos** en el log 4 son claramente el fondo semitransparente del panel de target (distinto del terreno marrón/verde).
 
-## Caminos que quedan
+El color `x528=rgb(146,138,171)` (lila más brillante) probablemente es el **borde/marco** del panel.
 
-### A. Barra de HP via píxeles (más viable a corto plazo)
-El panel del target está confirmado en `y≈55-80` del canvas. La barra de HP es una franja horizontal de color sólido:
-- HP alta → verde `rgb(~50, ~200, ~50)`
-- HP media → amarillo
-- HP baja → rojo
+### Cómo encontrar la barra de HP
 
-Implementar scan de línea horizontal buscando runs de color sólido en esa zona.
+La barra de HP en Flyff Universe es una franja horizontal de color sólido:
+- **HP alta** → verde `rgb(~50-100, ~180-220, ~50-80)`
+- **HP media** → amarillo/naranja
+- **HP baja** → rojo `rgb(~200-255, ~30-60, ~30-60)`
 
-### B. Acceso HEAP via Module.asm (complejo)
-En algunos builds Emscripten, la memoria es accesible via:
-```javascript
-const memory = Module.asm.__memory_base  // viejo
-// o
-const view = new Int8Array(Module.wasmMemory?.buffer)  // si wasmMemory existe
-// o buscar en Module._malloc retornando una dirección para triangular el buffer
+**Estrategia:** Escanear línea por línea dentro del área purpúrea del panel buscando:
+1. Filas con alta proporción de un color sólido dominante (R, G, o B >> otros dos)
+2. Que esa fila tenga al menos 20px consecutivos del mismo color (es una barra, no ruido)
+
+### Implementación pendiente
+
+```typescript
+// Buscar dentro del strip del panel (y=0 a y=25% canvas)
+// Para cada fila, buscar run de píxeles de mismo color
+// Si hay run > 20px de verde/rojo → es la barra de HP
+
+private findHPBar(pixels: Uint8ClampedArray, cw: number, stripH: number) {
+    for (let y = 0; y < stripH; y++) {
+        let greenRun = 0, redRun = 0, maxGreen = 0, maxRed = 0;
+        for (let x = 0; x < cw; x++) {
+            const i = (y * cw + x) * 4;
+            const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+            // Verde: g dominante
+            if (g > 120 && g > r * 1.5 && g > b * 1.5) {
+                greenRun++; maxGreen = Math.max(maxGreen, greenRun);
+            } else greenRun = 0;
+            // Rojo: r dominante
+            if (r > 150 && r > g * 2 && r > b * 2) {
+                redRun++; maxRed = Math.max(maxRed, redRun);
+            } else redRun = 0;
+        }
+        if (maxGreen > 20) return { y, color: 'green', run: maxGreen };
+        if (maxRed   > 20) return { y, color: 'red',   run: maxRed   };
+    }
+    return null;
+}
 ```
 
-### C. Reverse engineering del protocolo de red (muy complejo)
-Analizar el patrón de bytes encriptados para encontrar el key/IV y desencriptar paquetes. Requiere análisis del binario WASM.
+---
 
-### D. OCR sobre canvas (complejo, lento)
-Usar Tesseract.js o similar para leer el texto del panel del target. Lento (~500ms por frame).
+## Lo que falta testear
+
+### 🔬 Test 1: Detección de barra de HP (PRIORITARIO)
+- Implementar `findHPBar()` en `sampleTargetUI()`
+- Seleccionar mob con Target → ver si se detecta barra verde
+- Comparar mob normal vs mob con HP baja vs mob peligroso (nombre rojo)
+- **Resultado esperado:** Posición Y de la barra + color dominante
+
+### 🔬 Test 2: Acceso HEAP via Module.asm (EXPLORACIÓN)
+Verificar si la memoria WASM es accesible por ruta alternativa:
+```javascript
+// En DevTools con mob seleccionado:
+Module._malloc        // debería retornar una dirección
+// Luego buscar el buffer via:
+Object.values(Module).find(v => v instanceof WebAssembly.Memory)
+// o
+WebAssembly.instantiate  // ver si hay referencia accesible
+```
+
+### 🔬 Test 3: Correlación tamaño paquete con selección de mob
+Los paquetes grandes (4523b, 5257b) aparecen justo al seleccionar un mob. Verificar si siempre aparece un paquete de ese tamaño al hacer Tab, para identificar cuál es el "paquete de datos del mob".
 
 ---
 
 ## Archivos relevantes
 
-- `src/flyff.ts` → `sampleTargetUI()`, `scanTargetMemory()`, `searchHeapForMobName()`, `hookCanvasText()`
-- `src/utils/wsInterceptor.ts` → WebSocket hook via `prototype.send`
-- `src/utils/debugConsole.ts` → console con Download button
-- `DL/` → logs descargados de sesiones de debug
+| Archivo | Contenido |
+|---|---|
+| `src/flyff.ts` | `sampleTargetUI()`, `scanTargetMemory()`, `searchHeapForMobName()`, `hookCanvasText()` |
+| `src/utils/wsInterceptor.ts` | WebSocket hook via `prototype.send` + capture mode |
+| `src/utils/debugConsole.ts` | Console con fullLog buffer y botón Download |
+| `DL/*.txt` | Logs de sesiones de debug (no commitear) |
