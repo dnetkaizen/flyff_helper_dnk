@@ -40,9 +40,6 @@ class App {
         document.body.appendChild(container);
         new Draggabilly(<Element>container, {});
 
-        const debugPanel = html.toElement(html.debugConsolePanel)!;
-        document.body.appendChild(debugPanel);
-        new Draggabilly(<Element>debugPanel, { handle: '#dnk_debug_panel > div:first-child' });
         initDebugConsole();
         (window as any).dnkLog = debugLog;
         debugLog('DNK Debug Console iniciada', 'success');

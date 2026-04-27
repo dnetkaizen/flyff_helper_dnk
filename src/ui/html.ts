@@ -241,65 +241,24 @@ export const container = `<div id="cheats_container" style="${cheats_container_s
         <button id="cheats_toggle_all" class="btn btn-success" type="button" style="margin: ${BUTTON_MARGIN}; font-size: ${BUTTON_FONT_SIZE}; padding: ${BUTTON_PADDING};">On/Off</button>
         <button id="cheats_target" class="btn btn-primary" type="button" style="margin: ${BUTTON_MARGIN}; font-size: ${BUTTON_FONT_SIZE}; padding: ${BUTTON_PADDING};">Target</button>
         <button class="btn btn-primary" type="button" data-bs-toggle="collapse" data-bs-target="#cheats_collapse" aria-expanded="false" aria-controls="collapse_cheats" style="margin: ${BUTTON_MARGIN}; font-size: ${BUTTON_FONT_SIZE}; padding: ${BUTTON_PADDING};">Cheats</button>
-        <a id="cheats_upgrade" name="v${version}" href="#" style="text-align: center;">v${version}</a>    
+        <button id="dnk_console_toggle" class="btn btn-secondary" type="button" style="margin: ${BUTTON_MARGIN}; font-size: ${BUTTON_FONT_SIZE}; padding: ${BUTTON_PADDING};">Console</button>
+        <div id="dnk_console_body" style="display:none; flex-direction:column; width:280px; margin-top:2px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:3px 6px; background:#161b22; border-radius:4px 4px 0 0; border:1px solid #30363d; border-bottom:none;">
+                <span style="color:#58a6ff; font-size:10px; font-family:monospace; font-weight:bold;">DNK Console</span>
+                <div style="display:flex; gap:3px;">
+                    <button id="dnk_debug_copy" style="background:#238636;color:#fff;border:none;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">Copy</button>
+                    <button id="dnk_debug_clear" style="background:#da3633;color:#fff;border:none;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">Clear</button>
+                </div>
+            </div>
+            <div id="dnk_debug_log" style="height:160px;overflow-y:auto;padding:4px 6px;background:#0d1117;border:1px solid #30363d;border-radius:0 0 4px 4px;font-family:monospace;font-size:10px;"></div>
+        </div>
+        <a id="cheats_upgrade" name="v${version}" href="#" style="text-align: center;">v${version}</a>
     </div>
     <div id="cheats_minimized" style="display: none; align-items: center; justify-content: center;">
         <button id="cheats_maximize" class="btn btn-primary" type="button" style="margin: ${BUTTON_MARGIN}; font-size: ${BUTTON_FONT_SIZE}; padding: ${BUTTON_PADDING};">+</button>
     </div>
     ${partySkillsModal()}
     ${buffsModal()}
-</div>`;
-
-export const debugConsolePanel = `
-<div id="dnk_debug_panel" style="
-    position: fixed;
-    bottom: 10px;
-    left: 10px;
-    width: 480px;
-    background: #0d1117;
-    border: 1px solid #30363d;
-    border-radius: 8px;
-    font-family: monospace;
-    font-size: 11px;
-    z-index: 9998;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.6);
-">
-    <div style="
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 5px 10px;
-        background: #161b22;
-        border-bottom: 1px solid #30363d;
-        border-radius: 8px 8px 0 0;
-        cursor: move;
-        user-select: none;
-    ">
-        <span style="color:#58a6ff; font-weight: bold; font-size: 12px;">DNK Debug Console</span>
-        <div style="display:flex; gap:5px; align-items:center;">
-            <button id="dnk_debug_copy" style="
-                background:#238636; color:#fff; border:none; border-radius:4px;
-                padding: 2px 8px; font-size:10px; cursor:pointer;
-            ">Copy</button>
-            <button id="dnk_debug_clear" style="
-                background:#da3633; color:#fff; border:none; border-radius:4px;
-                padding: 2px 8px; font-size:10px; cursor:pointer;
-            ">Clear</button>
-            <button id="dnk_debug_toggle" style="
-                background:#30363d; color:#c9d1d9; border:none; border-radius:4px;
-                padding: 2px 8px; font-size:10px; cursor:pointer;
-            ">−</button>
-        </div>
-    </div>
-    <div id="dnk_debug_body" style="display:flex; flex-direction:column;">
-        <div id="dnk_debug_log" style="
-            height: 200px;
-            overflow-y: auto;
-            padding: 6px 10px;
-            background: #0d1117;
-            border-radius: 0 0 8px 8px;
-        "></div>
-    </div>
 </div>`;
 
 export const collapseTimeline = (id: number) => `
