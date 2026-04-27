@@ -250,6 +250,58 @@ export const container = `<div id="cheats_container" style="${cheats_container_s
     ${buffsModal()}
 </div>`;
 
+export const debugConsolePanel = `
+<div id="dnk_debug_panel" style="
+    position: fixed;
+    bottom: 10px;
+    left: 10px;
+    width: 480px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    font-family: monospace;
+    font-size: 11px;
+    z-index: 9998;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+">
+    <div style="
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 5px 10px;
+        background: #161b22;
+        border-bottom: 1px solid #30363d;
+        border-radius: 8px 8px 0 0;
+        cursor: move;
+        user-select: none;
+    ">
+        <span style="color:#58a6ff; font-weight: bold; font-size: 12px;">DNK Debug Console</span>
+        <div style="display:flex; gap:5px; align-items:center;">
+            <button id="dnk_debug_copy" style="
+                background:#238636; color:#fff; border:none; border-radius:4px;
+                padding: 2px 8px; font-size:10px; cursor:pointer;
+            ">Copy</button>
+            <button id="dnk_debug_clear" style="
+                background:#da3633; color:#fff; border:none; border-radius:4px;
+                padding: 2px 8px; font-size:10px; cursor:pointer;
+            ">Clear</button>
+            <button id="dnk_debug_toggle" style="
+                background:#30363d; color:#c9d1d9; border:none; border-radius:4px;
+                padding: 2px 8px; font-size:10px; cursor:pointer;
+            ">−</button>
+        </div>
+    </div>
+    <div id="dnk_debug_body" style="display:flex; flex-direction:column;">
+        <div id="dnk_debug_log" style="
+            height: 200px;
+            overflow-y: auto;
+            padding: 6px 10px;
+            background: #0d1117;
+            border-radius: 0 0 8px 8px;
+        "></div>
+    </div>
+</div>`;
+
 export const collapseTimeline = (id: number) => `
 <div style="align-items: center; display: flex; flex-direction: column; margin-top: 5px;" name="input_timeline" id="input_timeline_${id}">
     <div id="timeline_${id}_collapse" class="collapse card card-body" style="margin-bottom: 5px;"></div>

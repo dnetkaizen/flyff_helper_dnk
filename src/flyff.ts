@@ -6,6 +6,7 @@ import * as html from "./ui/html";
 import Input from "./utils/inputs";
 import { timer } from "./utils/timer";
 import { ImageDetection } from "./utils/imageDetection";
+import { initDebugConsole, debugLog } from "./utils/debugConsole";
 
 // Declare global chrome/browser APIs
 declare const chrome: any;
@@ -38,6 +39,13 @@ class App {
         const container = html.toElement(html.container)!;
         document.body.appendChild(container);
         new Draggabilly(<Element>container, {});
+
+        const debugPanel = html.toElement(html.debugConsolePanel)!;
+        document.body.appendChild(debugPanel);
+        new Draggabilly(<Element>debugPanel, { handle: '#dnk_debug_panel > div:first-child' });
+        initDebugConsole();
+        (window as any).dnkLog = debugLog;
+        debugLog('DNK Debug Console iniciada', 'success');
 
         let interval = -1;
         const follow = <HTMLInputElement>html.get(`#input_follow`);
