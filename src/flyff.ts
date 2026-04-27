@@ -892,8 +892,11 @@ class App {
 
         let done = false;
         let [x, x2, y, y2] = [0, 0, 0, 0];
+        let currentAngle = 0;
 
         const time = new Date().getTime();
+
+        debugLog(`[radar] inicio — pantalla: ${width}x${height} | centro: (${Math.round(centerX)}, ${Math.round(centerY)})`, 'info');
 
         return new Promise((resolve) => {
             this.input.cursorMutation = () => {
@@ -901,7 +904,31 @@ class App {
                 done = true;
                 this.input.cursorMutation = new Function();
 
-                (<any>window).timeout = new Date().getTime() - time;
+                const elapsed = new Date().getTime() - time;
+                (<any>window).timeout = elapsed;
+
+                const distFromCenter = Math.round(Math.hypot(x - centerX, y - centerY));
+                const cursorVal = document.body.style.getPropertyValue('cursor');
+
+                // sample pixel color at detected position
+                let pixelInfo = '';
+                try {
+                    const gameCanvas = document.querySelector('canvas') as HTMLCanvasElement;
+                    const tmp = document.createElement('canvas');
+                    tmp.width = gameCanvas.width;
+                    tmp.height = gameCanvas.height;
+                    const ctx = tmp.getContext('2d')!;
+                    ctx.drawImage(gameCanvas, 0, 0);
+                    const scaleX = gameCanvas.width / width;
+                    const scaleY = gameCanvas.height / height;
+                    const px = ctx.getImageData(Math.round(x * scaleX), Math.round(y * scaleY), 1, 1).data;
+                    pixelInfo = ` | pixel: rgb(${px[0]},${px[1]},${px[2]})`;
+                } catch (_) {}
+
+                debugLog(`[radar] MOB DETECTADO`, 'success');
+                debugLog(`  pos: (${Math.round(x)}, ${Math.round(y)}) | dist_centro: ${distFromCenter}px`, 'info');
+                debugLog(`  angulo: ${currentAngle.toFixed(2)} rad | tiempo: ${elapsed}ms${pixelInfo}`, 'info');
+                debugLog(`  cursor: ${cursorVal}`, 'info');
 
                 resolve(true);
             };
@@ -912,6 +939,7 @@ class App {
                 this.ctx2D.beginPath();
 
                 for (let angle = 0.01; angle < 72; angle += 0.01) {
+                    currentAngle = angle;
                     x2 = centerX + (10 + 5 * angle) * Math.cos(angle);
                     y2 = centerY + (10 + 5 * angle) * Math.sin(angle);
 
@@ -938,7 +966,12 @@ class App {
                     this.ctx2D.clearRect(0, 0, width, height)
                 );
 
-                (<any>window).timeout = new Date().getTime() - time;
+                const elapsed = new Date().getTime() - time;
+                (<any>window).timeout = elapsed;
+
+                if (!done) {
+                    debugLog(`[radar] sin resultado — recorrido completo en ${elapsed}ms`, 'warn');
+                }
 
                 resolve(false);
             })();
