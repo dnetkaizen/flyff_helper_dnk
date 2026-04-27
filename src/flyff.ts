@@ -994,44 +994,70 @@ class App {
             const ctx = tmp.getContext('2d')!;
             ctx.drawImage(gameCanvas, 0, 0);
 
-            // Sample top 20% of canvas — where target name/level/HP bar appears
-            const stripH = Math.floor(ch * 0.20);
-            const data = ctx.getImageData(0, 0, cw, stripH);
-            const pixels = data.data;
+            const stripH = Math.floor(ch * 0.25);
+            const imgData = ctx.getImageData(0, 0, cw, stripH);
+            const pixels = imgData.data;
 
-            const buckets = { red: 0, orange: 0, white: 0, yellow: 0, green: 0, other: 0 };
-            const total = pixels.length / 4;
+            // Scan row by row — find rows with notable non-terrain brightness variance
+            // Terrain rows are uniform/earthy; UI rows have sharp color transitions
+            const hotRows: { y: number; bright: number; r: number; g: number; b: number }[] = [];
 
-            for (let i = 0; i < pixels.length; i += 4) {
-                const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
-                // ignore near-black (background)
-                if (r < 20 && g < 20 && b < 20) continue;
+            for (let y = 0; y < stripH; y++) {
+                let sumR = 0, sumG = 0, sumB = 0, count = 0;
+                let minL = 255, maxL = 0;
 
-                if (r > 180 && g < 80  && b < 80)  buckets.red++;
-                else if (r > 200 && g > 100 && g < 180 && b < 60) buckets.orange++;
-                else if (r > 200 && g > 200 && b < 100) buckets.yellow++;
-                else if (r > 200 && g > 200 && b > 200) buckets.white++;
-                else if (g > 150 && r < 100 && b < 100) buckets.green++;
-                else buckets.other++;
+                for (let x = 0; x < cw; x += 4) {
+                    const i = (y * cw + x) * 4;
+                    const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
+                    const lum = (r + g + b) / 3;
+                    if (lum < 15) continue; // skip near-black
+                    sumR += r; sumG += g; sumB += b;
+                    if (lum < minL) minL = lum;
+                    if (lum > maxL) maxL = lum;
+                    count++;
+                }
+
+                if (count === 0) continue;
+                const variance = maxL - minL;
+                // Row is "interesting" if it has high brightness variance (UI border/text)
+                // or significant non-terrain saturation
+                if (variance > 80) {
+                    hotRows.push({
+                        y,
+                        bright: variance,
+                        r: Math.round(sumR / count),
+                        g: Math.round(sumG / count),
+                        b: Math.round(sumB / count),
+                    });
+                }
             }
 
-            const pct = (n: number) => ((n / total) * 100).toFixed(2) + '%';
+            debugLog(`[target UI] canvas: ${cw}x${ch} | strip: ${stripH}px | filas UI detectadas: ${hotRows.length}`, 'info');
 
-            debugLog(`[target UI] franja superior (20%) — ${cw}x${stripH}px`, 'info');
-            debugLog(`  rojo: ${pct(buckets.red)} | naranja: ${pct(buckets.orange)} | amarillo: ${pct(buckets.yellow)}`, 'info');
-            debugLog(`  blanco: ${pct(buckets.white)} | verde: ${pct(buckets.green)} | otro: ${pct(buckets.other)}`, 'info');
+            if (hotRows.length === 0) {
+                debugLog(`  sin panel de target visible (no se encontraron filas UI)`, 'warn');
+                return;
+            }
 
-            // sample 5 individual points across top strip to capture name text color
-            const samplePoints = [0.1, 0.25, 0.4, 0.55, 0.7].map(xRatio => {
-                const px = Math.floor(xRatio * cw);
-                const py = Math.floor(stripH * 0.3);
-                const idx = (py * cw + px) * 4;
-                return `(${px},${py})=rgb(${pixels[idx]},${pixels[idx+1]},${pixels[idx+2]})`;
+            // Log the top 8 most "active" rows sorted by variance
+            const top = hotRows.sort((a, b) => b.bright - a.bright).slice(0, 8);
+            top.forEach(row => {
+                debugLog(`  y=${row.y} | varianza=${row.bright} | avg rgb(${row.r},${row.g},${row.b})`, 'info');
             });
-            debugLog(`  muestras: ${samplePoints.join(' | ')}`, 'info');
+
+            // Sample 8 individual pixels at each hot row's peak, focused on left half (where UI usually is)
+            debugLog(`[target UI] muestras en zona izquierda (primeras 5 filas hot):`, 'info');
+            top.slice(0, 5).forEach(row => {
+                const samples = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30].map(xr => {
+                    const px = Math.floor(xr * cw);
+                    const i = (row.y * cw + px) * 4;
+                    return `x${px}=rgb(${pixels[i]},${pixels[i+1]},${pixels[i+2]})`;
+                });
+                debugLog(`  y=${row.y}: ${samples.join(' | ')}`, 'info');
+            });
 
         } catch (e) {
-            debugLog(`[target UI] error al samplear: ${e}`, 'error');
+            debugLog(`[target UI] error: ${e}`, 'error');
         }
     }
 
