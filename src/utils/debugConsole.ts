@@ -1,8 +1,9 @@
 type LogLevel = 'info' | 'warn' | 'error' | 'success';
 
-const MAX_ENTRIES = 200;
+const MAX_ENTRIES = 2000;
 
 let logArea: HTMLElement | null = null;
+const fullLog: string[] = [];
 
 export function initDebugConsole() {
     logArea = document.getElementById('dnk_debug_log');
@@ -18,10 +19,11 @@ export function initDebugConsole() {
 
     document.getElementById('dnk_debug_clear')?.addEventListener('click', () => {
         if (logArea) logArea.innerHTML = '';
+        fullLog.length = 0;
     });
 
     document.getElementById('dnk_debug_copy')?.addEventListener('click', () => {
-        const text = logArea?.innerText ?? '';
+        const text = fullLog.join('\n');
         navigator.clipboard.writeText(text).catch(() => {
             const ta = document.createElement('textarea');
             ta.value = text;
@@ -37,6 +39,18 @@ export function initDebugConsole() {
             setTimeout(() => { if (btn) btn.textContent = orig; }, 1200);
         }
     });
+
+    document.getElementById('dnk_debug_download')?.addEventListener('click', () => {
+        const text = fullLog.join('\n');
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        const ts   = new Date().toISOString().replace(/[:.]/g, '-');
+        a.href     = url;
+        a.download = `dnk_log_${ts}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+    });
 }
 
 export function debugLog(message: string, level: LogLevel = 'info') {
@@ -51,6 +65,9 @@ export function debugLog(message: string, level: LogLevel = 'info') {
 
     const now = new Date();
     const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}.${String(now.getMilliseconds()).padStart(3,'0')}`;
+    const line = `[${ts}] [${level.toUpperCase()}] ${message}`;
+
+    fullLog.push(line);
 
     const entry = document.createElement('div');
     entry.style.cssText = `color:${colors[level]};line-height:1.4;padding:1px 0;border-bottom:1px solid #21262d;word-break:break-all;`;

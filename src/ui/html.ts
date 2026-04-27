@@ -247,6 +247,7 @@ export const container = `<div id="cheats_container" style="${cheats_container_s
                 <span style="color:#58a6ff; font-size:10px; font-family:monospace; font-weight:bold;">DNK Console</span>
                 <div style="display:flex; gap:3px;">
                     <button id="dnk_debug_copy" style="background:#238636;color:#fff;border:none;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">Copy</button>
+                    <button id="dnk_debug_download" style="background:#1f6feb;color:#fff;border:none;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">DL</button>
                     <button id="dnk_debug_clear" style="background:#da3633;color:#fff;border:none;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">Clear</button>
                 </div>
             </div>
