@@ -894,41 +894,62 @@ class App {
     }
 
     private hookCanvasText() {
-        // Hook Module.ctx.fillText — called every time the game renders UI text
         const tryHook = () => {
             const mod = (window as any).Module;
-            const ctx = mod?.ctx;
-            if (!ctx || typeof ctx.fillText !== 'function') return false;
+            if (!mod) return false;
 
-            const origFill   = ctx.fillText.bind(ctx);
-            const origStroke = ctx.strokeText?.bind(ctx);
+            let hooked = false;
 
-            ctx.fillText = (text: string, x: number, y: number, maxWidth?: number) => {
-                if (text && String(text).trim().length > 1) {
-                    debugLog(`[canvas] fillText: "${text}" @ (${Math.round(x)},${Math.round(y)})`, 'success');
-                }
-                return origFill(text, x, y, maxWidth);
-            };
-
-            if (origStroke) {
-                ctx.strokeText = (text: string, x: number, y: number, maxWidth?: number) => {
-                    if (text && String(text).trim().length > 1) {
-                        debugLog(`[canvas] strokeText: "${text}" @ (${Math.round(x)},${Math.round(y)})`, 'info');
+            // 1. Hook UTF8ToString — fires every time WASM converts a C string to JS
+            if (typeof mod.UTF8ToString === 'function' && !mod.__dnk_utf8_hooked) {
+                const orig = mod.UTF8ToString.bind(mod);
+                mod.UTF8ToString = (ptr: number, maxBytes?: number) => {
+                    const str = orig(ptr, maxBytes);
+                    if (str && str.length >= 2 && str.length < 120) {
+                        // filter: only printable ASCII-ish, skip pure numbers and single chars
+                        if (/[A-Za-z]{2}/.test(str)) {
+                            debugLog(`[utf8] 0x${ptr.toString(16)}: "${str}"`, 'success');
+                        }
                     }
-                    return origStroke(text, x, y, maxWidth);
+                    return str;
                 };
+                mod.__dnk_utf8_hooked = true;
+                debugLog(`[hook] UTF8ToString interceptado`, 'success');
+                hooked = true;
             }
 
-            debugLog(`[canvas] fillText hook instalado en Module.ctx`, 'success');
-            return true;
+            // 2. Hook platform_text_edited — fired when game UI text changes
+            if (typeof mod.platform_text_edited === 'function' && !mod.__dnk_text_hooked) {
+                const orig = mod.platform_text_edited.bind(mod);
+                mod.platform_text_edited = (...args: any[]) => {
+                    debugLog(`[text_edited] args: ${JSON.stringify(args).slice(0, 200)}`, 'success');
+                    return orig(...args);
+                };
+                mod.__dnk_text_hooked = true;
+                debugLog(`[hook] platform_text_edited interceptado`, 'success');
+                hooked = true;
+            }
+
+            // 3. Hook platform_websocket_message — fired when WASM receives WS data
+            if (typeof mod.platform_websocket_message === 'function' && !mod.__dnk_wsmsg_hooked) {
+                const orig = mod.platform_websocket_message.bind(mod);
+                mod.platform_websocket_message = (...args: any[]) => {
+                    debugLog(`[ws_msg] args types: ${args.map((a: any) => typeof a).join(', ')} | first: ${String(args[0]).slice(0,100)}`, 'info');
+                    return orig(...args);
+                };
+                mod.__dnk_wsmsg_hooked = true;
+                debugLog(`[hook] platform_websocket_message interceptado`, 'success');
+                hooked = true;
+            }
+
+            return hooked;
         };
 
-        // Module.ctx may not exist yet — retry until available
         if (!tryHook()) {
             let attempts = 0;
-            const interval = setInterval(() => {
+            const iv = setInterval(() => {
                 attempts++;
-                if (tryHook() || attempts > 100) clearInterval(interval);
+                if (tryHook() || attempts > 100) clearInterval(iv);
             }, 300);
         }
     }
