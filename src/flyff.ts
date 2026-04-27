@@ -210,6 +210,7 @@ class App {
                 await timer(400);
                 this.sampleTargetUI();
                 this.scanTargetMemory();
+                await this.searchHeapForMobName();
             }
             target.classList.remove("btn-secondary");
             target.classList.add("btn-primary");
@@ -1136,6 +1137,64 @@ class App {
         }
 
         debugLog(`[mem scan] fin — objetos con datos de mob: ${found}`, found > 0 ? 'success' : 'warn');
+    }
+
+    private async searchHeapForMobName() {
+        const mod = (window as any).Module;
+        if (!mod?.HEAP8) {
+            debugLog(`[heap] Module.HEAP8 no disponible`, 'error');
+            return;
+        }
+
+        const heap = new Uint8Array(mod.HEAP8.buffer);
+        const totalMB = Math.round(heap.length / 1024 / 1024);
+        const SCAN_MB = Math.min(totalMB, 32);
+        const CHUNK = 256 * 1024;
+        const decoder = new TextDecoder('utf-8', { fatal: false });
+
+        // Common Flyff mob name patterns to search for
+        const PATTERNS = ['Aibatt', 'aibatt', 'Small', 'Mushpang', 'Lawolf', 'Doridoma', 'Mia', 'Lv.', 'Level'];
+
+        debugLog(`[heap] escaneando primeros ${SCAN_MB}MB de WASM memory en chunks...`, 'info');
+
+        const found: { addr: number; context: string }[] = [];
+
+        for (let offset = 0; offset < SCAN_MB * 1024 * 1024; offset += CHUNK) {
+            const end = Math.min(offset + CHUNK, heap.length);
+            const chunk = heap.subarray(offset, end);
+            const str = decoder.decode(chunk);
+
+            for (const pattern of PATTERNS) {
+                let idx = str.indexOf(pattern);
+                while (idx !== -1) {
+                    const addr = offset + idx;
+                    // grab context: 10 chars before and 40 after
+                    const ctxStart = Math.max(0, idx - 10);
+                    const ctxEnd   = Math.min(str.length, idx + 60);
+                    const context  = str.slice(ctxStart, ctxEnd).replace(/[^\x20-\x7E]/g, '·');
+                    if (!found.find(f => Math.abs(f.addr - addr) < 50)) {
+                        found.push({ addr, context });
+                    }
+                    idx = str.indexOf(pattern, idx + pattern.length);
+                }
+            }
+
+            // yield to browser every 4MB to avoid freeze
+            if (offset % (4 * 1024 * 1024) === 0 && offset > 0) {
+                debugLog(`[heap] progreso: ${Math.round(offset / 1024 / 1024)}/${SCAN_MB}MB — hits: ${found.length}`, 'info');
+                await new Promise(r => setTimeout(r, 0));
+            }
+        }
+
+        if (found.length === 0) {
+            debugLog(`[heap] no se encontraron strings de mobs en los primeros ${SCAN_MB}MB`, 'warn');
+            return;
+        }
+
+        debugLog(`[heap] encontrados ${found.length} hits:`, 'success');
+        found.slice(0, 20).forEach(f => {
+            debugLog(`  addr 0x${f.addr.toString(16).padStart(8,'0')}: "${f.context}"`, 'info');
+        });
     }
 
     private async attackTarget(
