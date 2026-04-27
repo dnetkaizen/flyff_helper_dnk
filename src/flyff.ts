@@ -978,6 +978,59 @@ class App {
         });
     }
 
+    private sampleTargetUI() {
+        try {
+            const gameCanvas = document.querySelector('canvas') as HTMLCanvasElement;
+            const cw = gameCanvas.width;
+            const ch = gameCanvas.height;
+
+            const tmp = document.createElement('canvas');
+            tmp.width = cw;
+            tmp.height = ch;
+            const ctx = tmp.getContext('2d')!;
+            ctx.drawImage(gameCanvas, 0, 0);
+
+            // Sample top 20% of canvas — where target name/level/HP bar appears
+            const stripH = Math.floor(ch * 0.20);
+            const data = ctx.getImageData(0, 0, cw, stripH);
+            const pixels = data.data;
+
+            const buckets = { red: 0, orange: 0, white: 0, yellow: 0, green: 0, other: 0 };
+            const total = pixels.length / 4;
+
+            for (let i = 0; i < pixels.length; i += 4) {
+                const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
+                // ignore near-black (background)
+                if (r < 20 && g < 20 && b < 20) continue;
+
+                if (r > 180 && g < 80  && b < 80)  buckets.red++;
+                else if (r > 200 && g > 100 && g < 180 && b < 60) buckets.orange++;
+                else if (r > 200 && g > 200 && b < 100) buckets.yellow++;
+                else if (r > 200 && g > 200 && b > 200) buckets.white++;
+                else if (g > 150 && r < 100 && b < 100) buckets.green++;
+                else buckets.other++;
+            }
+
+            const pct = (n: number) => ((n / total) * 100).toFixed(2) + '%';
+
+            debugLog(`[target UI] franja superior (20%) — ${cw}x${stripH}px`, 'info');
+            debugLog(`  rojo: ${pct(buckets.red)} | naranja: ${pct(buckets.orange)} | amarillo: ${pct(buckets.yellow)}`, 'info');
+            debugLog(`  blanco: ${pct(buckets.white)} | verde: ${pct(buckets.green)} | otro: ${pct(buckets.other)}`, 'info');
+
+            // sample 5 individual points across top strip to capture name text color
+            const samplePoints = [0.1, 0.25, 0.4, 0.55, 0.7].map(xRatio => {
+                const px = Math.floor(xRatio * cw);
+                const py = Math.floor(stripH * 0.3);
+                const idx = (py * cw + px) * 4;
+                return `(${px},${py})=rgb(${pixels[idx]},${pixels[idx+1]},${pixels[idx+2]})`;
+            });
+            debugLog(`  muestras: ${samplePoints.join(' | ')}`, 'info');
+
+        } catch (e) {
+            debugLog(`[target UI] error al samplear: ${e}`, 'error');
+        }
+    }
+
     private async attackTarget(
         target: HTMLInputElement,
         data: {
@@ -993,6 +1046,8 @@ class App {
             await timer(500);
             // Press Tab key first to target the monster
             await this.input.send({ cast: 100, key: "Tab" });
+            await timer(400);
+            this.sampleTargetUI();
             await timer(100);
             // Then press Z key
             await this.input.send({ cast: 100, key: "z" });
