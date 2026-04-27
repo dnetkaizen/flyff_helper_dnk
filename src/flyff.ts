@@ -894,51 +894,62 @@ class App {
     }
 
     private hookCanvasText() {
+        // 1. Hook CanvasRenderingContext2D.prototype.fillText globally
+        // catches ANY 2D canvas text rendering on the page (UI overlays, etc.)
+        if (!(CanvasRenderingContext2D.prototype as any).__dnk_fill_hooked) {
+            const origFill = CanvasRenderingContext2D.prototype.fillText;
+            CanvasRenderingContext2D.prototype.fillText = function(text, x, y, maxWidth) {
+                if (text && String(text).trim().length >= 2) {
+                    debugLog(`[canvas2d] fillText: "${text}" @ (${Math.round(x as number)},${Math.round(y as number)})`, 'success');
+                }
+                return origFill.apply(this, [text, x, y, maxWidth] as any);
+            };
+            (CanvasRenderingContext2D.prototype as any).__dnk_fill_hooked = true;
+            debugLog(`[hook] CanvasRenderingContext2D.fillText global instalado`, 'success');
+        }
+
+        // 2. Log all canvases found on page
+        const canvases = document.querySelectorAll('canvas');
+        debugLog(`[hook] canvases en página: ${canvases.length}`, 'info');
+        canvases.forEach((c, i) => {
+            debugLog(`  canvas[${i}]: ${c.width}x${c.height} id="${c.id}"`, 'info');
+        });
+
         const tryHook = () => {
             const mod = (window as any).Module;
             if (!mod) return false;
 
             let hooked = false;
 
-            // 1. Hook UTF8ToString — fires every time WASM converts a C string to JS
-            if (typeof mod.UTF8ToString === 'function' && !mod.__dnk_utf8_hooked) {
-                const orig = mod.UTF8ToString.bind(mod);
-                mod.UTF8ToString = (ptr: number, maxBytes?: number) => {
-                    const str = orig(ptr, maxBytes);
-                    if (str && str.length >= 2 && str.length < 120) {
-                        // filter: only printable ASCII-ish, skip pure numbers and single chars
-                        if (/[A-Za-z]{2}/.test(str)) {
-                            debugLog(`[utf8] 0x${ptr.toString(16)}: "${str}"`, 'success');
-                        }
-                    }
-                    return str;
-                };
-                mod.__dnk_utf8_hooked = true;
-                debugLog(`[hook] UTF8ToString interceptado`, 'success');
-                hooked = true;
-            }
-
-            // 2. Hook platform_text_edited — fired when game UI text changes
-            if (typeof mod.platform_text_edited === 'function' && !mod.__dnk_text_hooked) {
-                const orig = mod.platform_text_edited.bind(mod);
-                mod.platform_text_edited = (...args: any[]) => {
-                    debugLog(`[text_edited] args: ${JSON.stringify(args).slice(0, 200)}`, 'success');
-                    return orig(...args);
-                };
-                mod.__dnk_text_hooked = true;
-                debugLog(`[hook] platform_text_edited interceptado`, 'success');
-                hooked = true;
-            }
-
-            // 3. Hook platform_websocket_message — fired when WASM receives WS data
+            // 3. Hook platform_websocket_message — read actual event.data
             if (typeof mod.platform_websocket_message === 'function' && !mod.__dnk_wsmsg_hooked) {
                 const orig = mod.platform_websocket_message.bind(mod);
                 mod.platform_websocket_message = (...args: any[]) => {
-                    debugLog(`[ws_msg] args types: ${args.map((a: any) => typeof a).join(', ')} | first: ${String(args[0]).slice(0,100)}`, 'info');
+                    const event = args[0];
+                    const data  = event?.data;
+                    if (typeof data === 'string') {
+                        debugLog(`[ws_msg] text: ${data.slice(0, 200)}`, 'success');
+                    } else if (data instanceof ArrayBuffer) {
+                        const bytes = new Uint8Array(data);
+                        const hex = Array.from(bytes.slice(0, 16)).map((b: number) => b.toString(16).padStart(2,'0')).join(' ');
+                        debugLog(`[ws_msg] binary ${bytes.length}b → ${hex}`, 'info');
+                    }
                     return orig(...args);
                 };
                 mod.__dnk_wsmsg_hooked = true;
-                debugLog(`[hook] platform_websocket_message interceptado`, 'success');
+                debugLog(`[hook] platform_websocket_message instalado`, 'success');
+                hooked = true;
+            }
+
+            // 4. Hook platform_text_edited
+            if (typeof mod.platform_text_edited === 'function' && !mod.__dnk_text_hooked) {
+                const orig = mod.platform_text_edited.bind(mod);
+                mod.platform_text_edited = (...args: any[]) => {
+                    debugLog(`[text_edited] ${JSON.stringify(args).slice(0, 200)}`, 'success');
+                    return orig(...args);
+                };
+                mod.__dnk_text_hooked = true;
+                debugLog(`[hook] platform_text_edited instalado`, 'success');
                 hooked = true;
             }
 
