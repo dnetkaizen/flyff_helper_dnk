@@ -137,17 +137,28 @@ Botones: **Copy** (portapapeles), **DL** (descarga .txt completo), **Clear**
 
 ## Próximo paso: Servidor Python local
 
-El usuario quiere control total del mouse + OCR del nombre del mob. La arquitectura propuesta:
+**Repo:** https://github.com/dnetkaizen/flyff_mcp_dnk.git
+**Ruta local:** `C:\Users\SIEMENS\Documents\flyff_fwc_bot\flyff-python-server\`
 
 ```
 Extension JS → fetch('http://localhost:5000/analyze') → Python Flask
                      ↑ canvas screenshot (base64)
                      ↓ { name, type: 'normal'|'aggressive'|'dangerous' }
 
-Python server:
-  - EasyOCR / Tesseract → lee nombre del mob del screenshot
-  - pyautogui → control nativo de mouse/teclado si se necesita
-  - Futuro: YOLO para detección de mobs en pantalla
+Python server (ya implementado):
+  - api/app.py        → Flask endpoints /health y /analyze
+  - api/analyzer.py   → EasyOCR + color detection + mob classification
+  - recorder/record.py → graba gameplay (pantalla + inputs) para training
+  - docker-compose.yml → contenedor listo para levantar
+
+Arrancar servidor:
+    cd flyff-python-server
+    docker compose up --build
+
+Sin Docker (dev):
+    cd flyff-python-server/api
+    pip install -r requirements.txt
+    python app.py
 ```
 
 ---
