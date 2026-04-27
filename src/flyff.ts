@@ -206,7 +206,9 @@ class App {
             target.classList.add("btn-secondary");
             const found = await this.searchTarget();
             if (found) {
-                await timer(400);
+                // Tab to open target panel, then wait for UI to render
+                await this.input.send({ cast: 100, key: "Tab" });
+                await timer(500);
                 this.sampleTargetUI();
             }
             target.classList.remove("btn-secondary");
@@ -1000,25 +1002,39 @@ class App {
 
             // Panel background confirmed: rgb(76,76,127) — dark blue-purple
             // Detect panel Y range: rows where dominant color matches panel bg
-            const PANEL_B_MIN = 100; // blue dominant threshold
             let panelYStart = -1, panelYEnd = -1;
+            let maxRatio = 0, maxRatioY = -1;
 
             for (let y = 0; y < stripH; y++) {
-                let panelPixels = 0;
+                let panelPixels = 0, total = 0;
                 for (let x = 0; x < cw; x += 3) {
                     const i = (y * cw + x) * 4;
                     const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
-                    if (b > PANEL_B_MIN && b > r + 20 && b > g + 20) panelPixels++;
+                    total++;
+                    // blue dominant with tolerance: b > 90 and b > r+10 and b > g+10
+                    if (b > 90 && b > r + 10 && b > g + 10) panelPixels++;
                 }
-                const ratio = panelPixels / (cw / 3);
-                if (ratio > 0.3) {
+                const ratio = panelPixels / total;
+                if (ratio > maxRatio) { maxRatio = ratio; maxRatioY = y; }
+                if (ratio > 0.20) {
                     if (panelYStart === -1) panelYStart = y;
                     panelYEnd = y;
                 }
             }
 
             if (panelYStart === -1) {
-                debugLog(`[target UI] panel no detectado (sin fondo azul-purpúreo)`, 'warn');
+                debugLog(`[target UI] panel no detectado — mejor ratio: ${(maxRatio*100).toFixed(1)}% en y=${maxRatioY}`, 'warn');
+                // Log top-5 rows by average color for calibration
+                const rowAvgs: {y:number; r:number; g:number; b:number}[] = [];
+                for (let y = 0; y < Math.min(stripH, 120); y++) {
+                    let sr=0,sg=0,sb=0,n=0;
+                    for (let x=0; x<cw; x+=4) { const i=(y*cw+x)*4; sr+=pixels[i]; sg+=pixels[i+1]; sb+=pixels[i+2]; n++; }
+                    rowAvgs.push({y, r:Math.round(sr/n), g:Math.round(sg/n), b:Math.round(sb/n)});
+                }
+                // sort by blue dominance
+                rowAvgs.sort((a,b) => (b.b - b.r - b.g) - (a.b - a.r - a.g)).slice(0,8).forEach(r => {
+                    debugLog(`  y=${r.y}: avg rgb(${r.r},${r.g},${r.b})`, 'info');
+                });
                 return;
             }
 
