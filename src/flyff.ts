@@ -996,66 +996,80 @@ class App {
             ctx.drawImage(gameCanvas, 0, 0);
 
             const stripH = Math.floor(ch * 0.25);
-            const imgData = ctx.getImageData(0, 0, cw, stripH);
-            const pixels = imgData.data;
+            const pixels = ctx.getImageData(0, 0, cw, stripH).data;
 
-            // Scan row by row — find rows with notable non-terrain brightness variance
-            // Terrain rows are uniform/earthy; UI rows have sharp color transitions
-            const hotRows: { y: number; bright: number; r: number; g: number; b: number }[] = [];
+            // Panel background confirmed: rgb(76,76,127) — dark blue-purple
+            // Detect panel Y range: rows where dominant color matches panel bg
+            const PANEL_B_MIN = 100; // blue dominant threshold
+            let panelYStart = -1, panelYEnd = -1;
 
             for (let y = 0; y < stripH; y++) {
-                let sumR = 0, sumG = 0, sumB = 0, count = 0;
-                let minL = 255, maxL = 0;
-
-                for (let x = 0; x < cw; x += 4) {
+                let panelPixels = 0;
+                for (let x = 0; x < cw; x += 3) {
                     const i = (y * cw + x) * 4;
-                    const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
-                    const lum = (r + g + b) / 3;
-                    if (lum < 15) continue; // skip near-black
-                    sumR += r; sumG += g; sumB += b;
-                    if (lum < minL) minL = lum;
-                    if (lum > maxL) maxL = lum;
-                    count++;
+                    const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+                    if (b > PANEL_B_MIN && b > r + 20 && b > g + 20) panelPixels++;
                 }
-
-                if (count === 0) continue;
-                const variance = maxL - minL;
-                // Row is "interesting" if it has high brightness variance (UI border/text)
-                // or significant non-terrain saturation
-                if (variance > 80) {
-                    hotRows.push({
-                        y,
-                        bright: variance,
-                        r: Math.round(sumR / count),
-                        g: Math.round(sumG / count),
-                        b: Math.round(sumB / count),
-                    });
+                const ratio = panelPixels / (cw / 3);
+                if (ratio > 0.3) {
+                    if (panelYStart === -1) panelYStart = y;
+                    panelYEnd = y;
                 }
             }
 
-            debugLog(`[target UI] canvas: ${cw}x${ch} | strip: ${stripH}px | filas UI detectadas: ${hotRows.length}`, 'info');
-
-            if (hotRows.length === 0) {
-                debugLog(`  sin panel de target visible (no se encontraron filas UI)`, 'warn');
+            if (panelYStart === -1) {
+                debugLog(`[target UI] panel no detectado (sin fondo azul-purpúreo)`, 'warn');
                 return;
             }
 
-            // Log the top 8 most "active" rows sorted by variance
-            const top = hotRows.sort((a, b) => b.bright - a.bright).slice(0, 8);
-            top.forEach(row => {
-                debugLog(`  y=${row.y} | varianza=${row.bright} | avg rgb(${row.r},${row.g},${row.b})`, 'info');
-            });
+            debugLog(`[target UI] panel detectado y=${panelYStart}–${panelYEnd} (${panelYEnd - panelYStart + 1}px alto)`, 'success');
 
-            // Sample 8 individual pixels at each hot row's peak, focused on left half (where UI usually is)
-            debugLog(`[target UI] muestras en zona izquierda (primeras 5 filas hot):`, 'info');
-            top.slice(0, 5).forEach(row => {
-                const samples = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30].map(xr => {
-                    const px = Math.floor(xr * cw);
-                    const i = (row.y * cw + px) * 4;
-                    return `x${px}=rgb(${pixels[i]},${pixels[i+1]},${pixels[i+2]})`;
-                });
-                debugLog(`  y=${row.y}: ${samples.join(' | ')}`, 'info');
-            });
+            // Scan EVERY row inside panel looking for HP bar
+            // HP bar = horizontal run of 15+ consecutive green OR red pixels
+            let hpResult: { y: number; color: 'green'|'red'|'yellow'; run: number; xStart: number } | null = null;
+
+            for (let y = panelYStart; y <= panelYEnd && !hpResult; y++) {
+                let gRun = 0, rRun = 0, yRun = 0;
+                let gX = 0, rX = 0, yX = 0;
+
+                for (let x = 0; x < cw; x++) {
+                    const i = (y * cw + x) * 4;
+                    const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+
+                    // Green: g clearly dominant
+                    if (g > 120 && g > r * 1.4 && g > b * 1.4) {
+                        gRun++; if (gRun === 1) gX = x;
+                        if (gRun >= 15) { hpResult = { y, color: 'green', run: gRun, xStart: gX }; break; }
+                    } else gRun = 0;
+
+                    // Red: r clearly dominant
+                    if (r > 140 && r > g * 2 && r > b * 2) {
+                        rRun++; if (rRun === 1) rX = x;
+                        if (rRun >= 15) { hpResult = { y, color: 'red', run: rRun, xStart: rX }; break; }
+                    } else rRun = 0;
+
+                    // Yellow: r+g high, b low (mid HP)
+                    if (r > 160 && g > 140 && b < 80) {
+                        yRun++; if (yRun === 1) yX = x;
+                        if (yRun >= 15) { hpResult = { y, color: 'yellow', run: yRun, xStart: yX }; break; }
+                    } else yRun = 0;
+                }
+            }
+
+            if (hpResult) {
+                debugLog(`[target UI] HP bar: color=${hpResult.color} y=${hpResult.y} x=${hpResult.xStart} run=${hpResult.run}px`, 'success');
+            } else {
+                debugLog(`[target UI] HP bar no encontrada dentro del panel — logueo fila a fila:`, 'warn');
+                // Log avg color of each panel row to help calibrate
+                for (let y = panelYStart; y <= Math.min(panelYEnd, panelYStart + 20); y++) {
+                    let sumR = 0, sumG = 0, sumB = 0, n = 0;
+                    for (let x = 0; x < cw; x += 4) {
+                        const i = (y * cw + x) * 4;
+                        sumR += pixels[i]; sumG += pixels[i+1]; sumB += pixels[i+2]; n++;
+                    }
+                    debugLog(`  y=${y}: avg rgb(${Math.round(sumR/n)},${Math.round(sumG/n)},${Math.round(sumB/n)})`, 'info');
+                }
+            }
 
         } catch (e) {
             debugLog(`[target UI] error: ${e}`, 'error');
