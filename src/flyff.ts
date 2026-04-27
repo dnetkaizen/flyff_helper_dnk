@@ -7,7 +7,7 @@ import Input from "./utils/inputs";
 import { timer } from "./utils/timer";
 import { ImageDetection } from "./utils/imageDetection";
 import { initDebugConsole, debugLog } from "./utils/debugConsole";
-import { initWebSocketInterceptor, activateCapture } from "./utils/wsInterceptor";
+import { initWebSocketInterceptor } from "./utils/wsInterceptor";
 
 // Declare global chrome/browser APIs
 declare const chrome: any;
@@ -44,7 +44,6 @@ class App {
         initDebugConsole();
         (window as any).dnkLog = debugLog;
         debugLog('DNK Debug Console iniciada', 'success');
-        this.hookCanvasText();
 
         let interval = -1;
         const follow = <HTMLInputElement>html.get(`#input_follow`);
@@ -207,11 +206,8 @@ class App {
             target.classList.add("btn-secondary");
             const found = await this.searchTarget();
             if (found) {
-                activateCapture();
                 await timer(400);
                 this.sampleTargetUI();
-                this.scanTargetMemory();
-                await this.searchHeapForMobName();
             }
             target.classList.remove("btn-secondary");
             target.classList.add("btn-primary");
@@ -893,78 +889,6 @@ class App {
         }
     }
 
-    private hookCanvasText() {
-        // 1. Hook CanvasRenderingContext2D.prototype.fillText globally
-        // catches ANY 2D canvas text rendering on the page (UI overlays, etc.)
-        if (!(CanvasRenderingContext2D.prototype as any).__dnk_fill_hooked) {
-            const origFill = CanvasRenderingContext2D.prototype.fillText;
-            CanvasRenderingContext2D.prototype.fillText = function(text, x, y, maxWidth) {
-                if (text && String(text).trim().length >= 2) {
-                    debugLog(`[canvas2d] fillText: "${text}" @ (${Math.round(x as number)},${Math.round(y as number)})`, 'success');
-                }
-                return origFill.apply(this, [text, x, y, maxWidth] as any);
-            };
-            (CanvasRenderingContext2D.prototype as any).__dnk_fill_hooked = true;
-            debugLog(`[hook] CanvasRenderingContext2D.fillText global instalado`, 'success');
-        }
-
-        // 2. Log all canvases found on page
-        const canvases = document.querySelectorAll('canvas');
-        debugLog(`[hook] canvases en página: ${canvases.length}`, 'info');
-        canvases.forEach((c, i) => {
-            debugLog(`  canvas[${i}]: ${c.width}x${c.height} id="${c.id}"`, 'info');
-        });
-
-        const tryHook = () => {
-            const mod = (window as any).Module;
-            if (!mod) return false;
-
-            let hooked = false;
-
-            // 3. Hook platform_websocket_message — read actual event.data
-            if (typeof mod.platform_websocket_message === 'function' && !mod.__dnk_wsmsg_hooked) {
-                const orig = mod.platform_websocket_message.bind(mod);
-                mod.platform_websocket_message = (...args: any[]) => {
-                    const event = args[0];
-                    const data  = event?.data;
-                    if (typeof data === 'string') {
-                        debugLog(`[ws_msg] text: ${data.slice(0, 200)}`, 'success');
-                    } else if (data instanceof ArrayBuffer) {
-                        const bytes = new Uint8Array(data);
-                        const hex = Array.from(bytes.slice(0, 16)).map((b: number) => b.toString(16).padStart(2,'0')).join(' ');
-                        debugLog(`[ws_msg] binary ${bytes.length}b → ${hex}`, 'info');
-                    }
-                    return orig(...args);
-                };
-                mod.__dnk_wsmsg_hooked = true;
-                debugLog(`[hook] platform_websocket_message instalado`, 'success');
-                hooked = true;
-            }
-
-            // 4. Hook platform_text_edited
-            if (typeof mod.platform_text_edited === 'function' && !mod.__dnk_text_hooked) {
-                const orig = mod.platform_text_edited.bind(mod);
-                mod.platform_text_edited = (...args: any[]) => {
-                    debugLog(`[text_edited] ${JSON.stringify(args).slice(0, 200)}`, 'success');
-                    return orig(...args);
-                };
-                mod.__dnk_text_hooked = true;
-                debugLog(`[hook] platform_text_edited instalado`, 'success');
-                hooked = true;
-            }
-
-            return hooked;
-        };
-
-        if (!tryHook()) {
-            let attempts = 0;
-            const iv = setInterval(() => {
-                attempts++;
-                if (tryHook() || attempts > 100) clearInterval(iv);
-            }, 300);
-        }
-    }
-
     private searchTarget() {
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -1136,138 +1060,6 @@ class App {
         } catch (e) {
             debugLog(`[target UI] error: ${e}`, 'error');
         }
-    }
-
-    private scanTargetMemory() {
-        debugLog(`[mem scan] explorando window...`, 'info');
-
-        const MOB_KEYS = ['name','hp','mp','maxhp','maxmp','level','health','mana','target','entity','mob','monster','selected'];
-
-        // Keys and constructors that are safe to skip (huge buffers, DOM, etc.)
-        const SKIP_KEYS = new Set(['HEAP8','HEAP16','HEAP32','HEAPU8','HEAPU16','HEAPU32','HEAPF32','HEAPF64','buffer','asm','wasmMemory','wasmTable','canvas','document','window','self','top','parent','frames','performance','crypto','indexedDB','caches','localStorage','sessionStorage','history','location','navigator','screen']);
-        const SKIP_CTORS = new Set(['Uint8Array','Int8Array','Uint16Array','Int16Array','Uint32Array','Int32Array','Float32Array','Float64Array','ArrayBuffer','SharedArrayBuffer','HTMLCanvasElement','WebGLRenderingContext']);
-
-        const isSafe = (v: any): boolean => {
-            if (v === null || v === undefined) return false;
-            if (typeof v !== 'object') return false;
-            const ctor = v?.constructor?.name ?? '';
-            if (SKIP_CTORS.has(ctor)) return false;
-            if (v instanceof ArrayBuffer) return false;
-            return true;
-        };
-
-        const formatVal = (v: any): string => {
-            if (v === null) return 'null';
-            if (v === undefined) return 'undefined';
-            const t = typeof v;
-            if (t === 'function') return '[fn]';
-            if (t === 'string') return `"${v.slice(0, 80)}${v.length > 80 ? '…' : ''}"`;
-            if (t === 'number' || t === 'boolean') return String(v);
-            if (t === 'object') {
-                const ctor = v?.constructor?.name ?? '';
-                if (SKIP_CTORS.has(ctor)) return `[${ctor}]`;
-                try {
-                    const keys = Object.keys(v).slice(0, 6);
-                    return `{ ${keys.map(k => `${k}: ${typeof v[k] === 'object' ? '[obj]' : String(v[k]).slice(0,30)}`).join(', ')} }`;
-                } catch { return '[object]'; }
-            }
-            return `[${t}]`;
-        };
-
-        // 1. Scan window.Module safely (only non-heap keys)
-        const mod = (window as any).Module;
-        if (mod) {
-            const safeKeys = Object.keys(mod).filter(k => !SKIP_KEYS.has(k) && !k.startsWith('HEAP') && !k.startsWith('asm') && !k.startsWith('dynCall'));
-            debugLog(`[mem scan] window.Module — ${safeKeys.length} keys seguras`, 'success');
-            debugLog(`  keys: ${safeKeys.slice(0, 30).join(', ')}`, 'info');
-            const hits = safeKeys.filter(k => MOB_KEYS.some(mk => k.toLowerCase().includes(mk)));
-            if (hits.length > 0) {
-                debugLog(`  hits mob: ${hits.join(', ')}`, 'success');
-                hits.forEach(k => { try { debugLog(`  Module.${k} = ${formatVal(mod[k])}`, 'info'); } catch {} });
-            }
-        } else {
-            debugLog(`[mem scan] window.Module no encontrado`, 'warn');
-        }
-
-        // 2. Scan window globals (plain objects only, skip known heavy keys)
-        let found = 0;
-        const winKeys = Object.keys(window).filter(k => !SKIP_KEYS.has(k));
-        for (const key of winKeys) {
-            try {
-                const val = (window as any)[key];
-                if (!isSafe(val)) continue;
-                const keys = Object.keys(val);
-                if (keys.length > 500) continue; // skip huge objects
-                const hits = keys.filter(k => MOB_KEYS.some(mk => k.toLowerCase().includes(mk)));
-                if (hits.length >= 2) {
-                    found++;
-                    debugLog(`[mem scan] window.${key} — hits: [${hits.join(', ')}]`, 'success');
-                    hits.slice(0, 10).forEach(k => {
-                        try { debugLog(`  .${k} = ${formatVal(val[k])}`, 'info'); } catch {}
-                    });
-                }
-            } catch {}
-        }
-
-        debugLog(`[mem scan] fin — objetos con datos de mob: ${found}`, found > 0 ? 'success' : 'warn');
-    }
-
-    private async searchHeapForMobName() {
-        const mod = (window as any).Module;
-        if (!mod?.HEAP8) {
-            debugLog(`[heap] Module.HEAP8 no disponible`, 'error');
-            return;
-        }
-
-        const heap = new Uint8Array(mod.HEAP8.buffer);
-        const totalMB = Math.round(heap.length / 1024 / 1024);
-        const SCAN_MB = Math.min(totalMB, 32);
-        const CHUNK = 256 * 1024;
-        const decoder = new TextDecoder('utf-8', { fatal: false });
-
-        // Common Flyff mob name patterns to search for
-        const PATTERNS = ['Aibatt', 'aibatt', 'Small', 'Mushpang', 'Lawolf', 'Doridoma', 'Mia', 'Lv.', 'Level'];
-
-        debugLog(`[heap] escaneando primeros ${SCAN_MB}MB de WASM memory en chunks...`, 'info');
-
-        const found: { addr: number; context: string }[] = [];
-
-        for (let offset = 0; offset < SCAN_MB * 1024 * 1024; offset += CHUNK) {
-            const end = Math.min(offset + CHUNK, heap.length);
-            const chunk = heap.subarray(offset, end);
-            const str = decoder.decode(chunk);
-
-            for (const pattern of PATTERNS) {
-                let idx = str.indexOf(pattern);
-                while (idx !== -1) {
-                    const addr = offset + idx;
-                    // grab context: 10 chars before and 40 after
-                    const ctxStart = Math.max(0, idx - 10);
-                    const ctxEnd   = Math.min(str.length, idx + 60);
-                    const context  = str.slice(ctxStart, ctxEnd).replace(/[^\x20-\x7E]/g, '·');
-                    if (!found.find(f => Math.abs(f.addr - addr) < 50)) {
-                        found.push({ addr, context });
-                    }
-                    idx = str.indexOf(pattern, idx + pattern.length);
-                }
-            }
-
-            // yield to browser every 4MB to avoid freeze
-            if (offset % (4 * 1024 * 1024) === 0 && offset > 0) {
-                debugLog(`[heap] progreso: ${Math.round(offset / 1024 / 1024)}/${SCAN_MB}MB — hits: ${found.length}`, 'info');
-                await new Promise(r => setTimeout(r, 0));
-            }
-        }
-
-        if (found.length === 0) {
-            debugLog(`[heap] no se encontraron strings de mobs en los primeros ${SCAN_MB}MB`, 'warn');
-            return;
-        }
-
-        debugLog(`[heap] encontrados ${found.length} hits:`, 'success');
-        found.slice(0, 20).forEach(f => {
-            debugLog(`  addr 0x${f.addr.toString(16).padStart(8,'0')}: "${f.context}"`, 'info');
-        });
     }
 
     private async attackTarget(
