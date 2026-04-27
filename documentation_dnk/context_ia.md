@@ -53,20 +53,28 @@ git push               # subir cambios a opusnk
 ```
 src/
 ├── flyff.ts                    # App principal — clase App, constructor, todos los handlers
+│   ├── hookCanvasText()        # Hooks: fillText global, platform_websocket_message, platform_text_edited
+│   ├── sampleTargetUI()        # Scan de píxeles del panel del target (top 25% canvas)
+│   ├── scanTargetMemory()      # Scan de window globals buscando datos de mob
+│   └── searchHeapForMobName()  # Búsqueda de strings en WASM HEAP (HEAP8 no disponible)
 ├── ui/
-│   └── html.ts                 # Templates HTML de toda la UI (strings literales)
+│   └── html.ts                 # Templates HTML — incluye DNK Console con botones Copy/DL/Clear
 └── utils/
-    ├── debugConsole.ts         # DNK Debug Console: initDebugConsole() + debugLog()
+    ├── debugConsole.ts         # DNK Debug Console con fullLog buffer y Download
+    ├── wsInterceptor.ts        # WebSocket hook via prototype.send + capture mode
     ├── imageDetection.ts       # Template matching para detección de monstruos
     ├── inputs.ts               # Inyección de mouse/teclado via JSEvents
     └── timer.ts                # Helpers de delay
 
 documentation_dnk/
 ├── context_ia.md               # ESTE ARCHIVO — leer al inicio de sesión
+├── investigacion_mob_data.md   # ⚠️ LEER — todos los métodos intentados para leer datos del mob
 ├── handoff_completo.md         # Historial completo de sesiones y decisiones técnicas
 ├── deteccion_monstruos.md      # Research de detección de monstruos
 ├── canvas_events_research.md   # Research de eventos de canvas WebGL
 └── sesion_debug.md             # Notas de sesión de debug
+
+DL/                             # Logs descargados del debug console (NO commitear)
 ```
 
 ---
@@ -150,8 +158,18 @@ chore: descripción corta       # build, config, sin lógica
 
 ## Checklist de tareas pendientes
 
+- [ ] Confirmar si `CanvasRenderingContext2D.prototype.fillText` global captura texto del juego
+- [ ] Implementar detección de barra de HP via scan de línea horizontal de color sólido
+- [ ] Explorar acceso a HEAP via `Module.asm` o `Module._malloc` para triangular buffer
 - [ ] Reemplazar `assets/monster_template.png` con screenshot real del juego
-- [ ] Calibrar `isTargetSafe()` con Scan Target sobre mob normal y mob peligroso
+- [ ] Calibrar `isTargetSafe()` con datos reales de colores del panel de target
 - [ ] Probar flujo completo: Target → Tab → isTargetSafe → atacar/skip
-- [ ] Considerar radar en grid en lugar de espiral (búsqueda más uniforme)
 - [ ] Mergear `opusnk` → `main` cuando esté estable
+
+## ⚠️ NO volver a intentar (ya falló)
+
+- Subclase de WebSocket (`class X extends WebSocket`) → crashea el juego
+- `Module.UTF8ToString` hook → WASM no lo usa
+- `Module.platform_text_edited` hook → nunca se dispara para mobs
+- Scan de `window` globals para datos de mob → solo falsos positivos Emscripten
+- `Module.HEAP8` → no expuesto en este build
