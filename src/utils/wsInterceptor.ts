@@ -4,35 +4,32 @@ let captureMode = false;
 let captureCount = 0;
 const CAPTURE_LIMIT = 10;
 
+const knownSockets = new WeakSet<WebSocket>();
+
 export function activateCapture() {
     captureMode = true;
     captureCount = 0;
-    debugLog(`[ws] modo captura activado — próximos ${CAPTURE_LIMIT} paquetes`, 'warn');
+    debugLog(`[ws] captura activada — próximos ${CAPTURE_LIMIT} paquetes`, 'warn');
 }
 
 function extractStrings(bytes: Uint8Array, minLen = 3): string {
     const results: string[] = [];
-    let current = '';
+    let cur = '';
     for (let i = 0; i < bytes.length; i++) {
         const c = bytes[i];
-        if (c >= 32 && c <= 126) {
-            current += String.fromCharCode(c);
-        } else {
-            if (current.length >= minLen) results.push(current);
-            current = '';
-        }
+        if (c >= 32 && c <= 126) { cur += String.fromCharCode(c); }
+        else { if (cur.length >= minLen) results.push(cur); cur = ''; }
     }
-    if (current.length >= minLen) results.push(current);
+    if (cur.length >= minLen) results.push(cur);
     return results.join(' | ');
 }
 
-function toHex(bytes: Uint8Array, limit = 24): string {
+function toHex(bytes: Uint8Array, limit = 32): string {
     return Array.from(bytes.slice(0, limit))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join(' ');
+        .map(b => b.toString(16).padStart(2, '0')).join(' ');
 }
 
-function handleMessage(data: any) {
+function onMessage(data: any) {
     if (!captureMode) return;
     if (captureCount >= CAPTURE_LIMIT) {
         captureMode = false;
@@ -42,44 +39,37 @@ function handleMessage(data: any) {
     captureCount++;
 
     if (typeof data === 'string') {
-        debugLog(`[ws #${captureCount}] text (${data.length}c): ${data.slice(0, 300)}`, 'info');
+        debugLog(`[ws #${captureCount}] text: ${data.slice(0, 300)}`, 'info');
         return;
     }
 
-    const processBuffer = (buf: ArrayBuffer) => {
+    const process = (buf: ArrayBuffer) => {
         const bytes = new Uint8Array(buf);
-        const hex = toHex(bytes);
-        const strings = extractStrings(bytes);
-        debugLog(`[ws #${captureCount}] binary ${bytes.length}b | hex: ${hex}`, 'info');
-        if (strings) debugLog(`  strings: ${strings}`, 'success');
+        debugLog(`[ws #${captureCount}] binary ${bytes.length}b → ${toHex(bytes)}`, 'info');
+        const str = extractStrings(bytes);
+        if (str) debugLog(`  strings: ${str}`, 'success');
     };
 
-    if (data instanceof ArrayBuffer) {
-        processBuffer(data);
-    } else if (data instanceof Blob) {
-        data.arrayBuffer().then(processBuffer);
-    }
+    if (data instanceof ArrayBuffer) process(data);
+    else if (data instanceof Blob) data.arrayBuffer().then(process);
+}
+
+function attachToSocket(ws: WebSocket, url: string) {
+    if (knownSockets.has(ws)) return;
+    knownSockets.add(ws);
+    debugLog(`[ws] socket detectado → ${url}`, 'success');
+    ws.addEventListener('message', (e: MessageEvent) => onMessage(e.data));
+    ws.addEventListener('close',   (e: CloseEvent)  => debugLog(`[ws] cerrado (${e.code}) ${url}`, 'warn'));
 }
 
 export function initWebSocketInterceptor() {
-    const OrigWS = (window as any).WebSocket;
-    if (!OrigWS) {
-        debugLog(`[ws] WebSocket no disponible`, 'error');
-        return;
-    }
+    const origSend = WebSocket.prototype.send;
 
-    class FlyffWS extends OrigWS {
-        constructor(url: string, protocols?: string | string[]) {
-            super(url, protocols);
-            debugLog(`[ws] nueva conexión → ${url}`, 'success');
+    // Hook send — fired the first time the game sends data on each socket
+    WebSocket.prototype.send = function(data) {
+        attachToSocket(this, this.url);
+        return origSend.apply(this, [data]);
+    };
 
-            this.addEventListener('open',  () => debugLog(`[ws] conectado: ${url}`, 'success'));
-            this.addEventListener('close', (e: CloseEvent) => debugLog(`[ws] cerrado (code=${e.code})`, 'warn'));
-            this.addEventListener('error', () => debugLog(`[ws] error de conexión`, 'error'));
-            this.addEventListener('message', (e: MessageEvent) => handleMessage(e.data));
-        }
-    }
-
-    (window as any).WebSocket = FlyffWS;
-    debugLog(`[ws] interceptor instalado`, 'success');
+    debugLog(`[ws] interceptor instalado (via prototype.send)`, 'success');
 }
