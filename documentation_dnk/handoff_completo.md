@@ -47,6 +47,16 @@ npm run build-firefox  # output: dist/firefox/
 - 4 herramientas de inspección: Scan Window, Scan DOM, Pixel Inspector, Scan Target
 - Botones: copy, clear, ✕
 
+### 5. DNK Debug Console (rama `opusnk`) — FUNCIONA
+- Panel flotante oscuro (estilo GitHub dark), arrastrable, esquina inferior izquierda
+- Timestamps en cada línea `[HH:MM:SS.ms]`
+- Niveles: `info` / `warn` / `error` / `success` con colores diferenciados
+- Botón **Clear** — limpia todos los logs
+- Botón **Copy** — copia todo al portapapeles (feedback visual "Copied!")
+- Botón **−** — minimiza/expande el panel
+- Acceso global desde cualquier archivo: `(window as any).dnkLog('msg', 'warn')`
+- Módulo: `src/utils/debugConsole.ts` → `initDebugConsole()` + `debugLog()`
+
 ---
 
 ## Bugs corregidos en esta sesión
@@ -102,7 +112,7 @@ src/
 │   ├── detectAndClickMonster() # Tecla Alt → template matching
 │   ├── searchTarget()          # Botón Target → radar de cursor
 │   ├── loadMonsterTemplate()   # Carga base64 del template
-│   ├── debugLog()              # Log al panel de debug
+│   ├── debugLog()              # Log al panel de debug (interno)
 │   ├── inspectWindow()         # Scan variables globales del juego
 │   ├── inspectDOM()            # Scan elementos HTML del juego
 │   ├── inspectTarget()         # Scan colores UI del target seleccionado
@@ -110,8 +120,10 @@ src/
 │   └── initResize()            # Resize del panel con drag
 ├── ui/
 │   └── html.ts                 # Templates HTML de la UI
-│       └── container           # Panel principal con debug panel
+│       ├── container           # Panel principal con debug panel
+│       └── debugConsolePanel   # DNK Debug Console (opusnk)
 ├── utils/
+│   ├── debugConsole.ts         # DNK Debug Console: initDebugConsole() + debugLog() (opusnk)
 │   ├── imageDetection.ts       # Template matching + logs detallados
 │   ├── inputs.ts               # Mouse/keyboard injection + JSEvents
 │   ├── timer.ts                # Delays
@@ -239,6 +251,40 @@ npm run build-chrome
 - [ ] Calibrar `isTargetSafe()` con los colores obtenidos (commit d17a234 en ultronk)
 - [ ] Probar flujo completo: Target → Tab → isTargetSafe → atacar/skip
 - [ ] Considerar mejora del radar: grid en lugar de espiral
+
+---
+
+## Cambios opusnk (sesión 2026-04-26)
+
+### Implementado: DNK Debug Console
+
+**Archivos modificados:**
+- `src/utils/debugConsole.ts` *(nuevo)* — módulo de consola de debug
+- `src/ui/html.ts` — agregado `debugConsolePanel` al final
+- `src/flyff.ts` — inicialización del panel en el constructor + exposición global
+
+**Funcionalidades:**
+- Panel flotante oscuro arrastrable (esquina inferior izquierda, 480px ancho, 200px alto)
+- Cada entrada muestra `[HH:MM:SS.ms] [NIVEL] mensaje`
+- Niveles con color: `info` (gris), `warn` (amarillo), `error` (rojo), `success` (verde)
+- Máximo 200 entradas (elimina las más antiguas automáticamente)
+- Botón **Clear** → limpia el log
+- Botón **Copy** → copia todo al portapapeles con feedback visual "Copied!"
+- Botón **−** → minimiza/expande el cuerpo del panel
+- Exposición global: `window.dnkLog('mensaje', 'warn')` usable desde consola del navegador o cualquier módulo
+
+**Uso desde código:**
+```typescript
+import { debugLog } from './utils/debugConsole';
+debugLog('Conexión establecida', 'success');
+debugLog('Valor inesperado: ' + val, 'warn');
+debugLog('Error en detección', 'error');
+```
+
+**Uso desde consola del navegador (DevTools):**
+```javascript
+dnkLog('test manual', 'info')
+```
 
 ---
 
